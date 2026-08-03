@@ -17,10 +17,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -34,9 +32,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -54,9 +50,6 @@ fun LibraryScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-
-    var showAddMenu by remember { mutableStateOf(false) }
-    var showAddUrl by remember { mutableStateOf(false) }
 
     val openDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -77,42 +70,26 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text("My Library") },
                 actions = {
-                    IconButton(onClick = onOpenReview) { Icon(Icons.Filled.Link, contentDescription = "Review due cards") }
+                    IconButton(onClick = onOpenReview) { Icon(Icons.Filled.List, contentDescription = "Review due cards") }
                 },
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            Column {
-                ExtendedFloatingActionButton(
-                    onClick = { showAddMenu = true },
-                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    text = { Text("Add book") },
-                )
-                DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Upload file (PDF / EPUB / TXT / MOBI)") },
-                        onClick = {
-                            showAddMenu = false
-                            openDocument.launch(
-                                arrayOf(
-                                    "application/pdf",
-                                    "application/epub+zip",
-                                    "text/plain",
-                                    "*/*",
-                                ),
-                            )
-                        },
+            ExtendedFloatingActionButton(
+                onClick = {
+                    openDocument.launch(
+                        arrayOf(
+                            "application/pdf",
+                            "application/epub+zip",
+                            "application/x-mobipocket-ebook",
+                            "*/*",
+                        ),
                     )
-                    DropdownMenuItem(
-                        text = { Text("Add from URL") },
-                        onClick = {
-                            showAddMenu = false
-                            showAddUrl = true
-                        },
-                    )
-                }
-            }
+                },
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text("Add book") },
+            )
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -127,7 +104,7 @@ fun LibraryScreen(
 
             if (sources.isEmpty() && !uiState.importing) {
                 Text(
-                    "No books yet. Tap \"Add book\" to upload a PDF/EPUB/TXT file or paste a link.",
+                    "No books yet. Tap \"Add book\" to upload a PDF, EPUB, or MOBI file.",
                     modifier = Modifier.padding(24.dp),
                 )
             }
@@ -138,16 +115,6 @@ fun LibraryScreen(
                 }
             }
         }
-    }
-
-    if (showAddUrl) {
-        AddUrlDialog(
-            onDismiss = { showAddUrl = false },
-            onSubmit = { url ->
-                showAddUrl = false
-                viewModel.importUrl(url)
-            },
-        )
     }
 }
 

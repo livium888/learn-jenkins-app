@@ -56,14 +56,11 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
-    // EPUB parsing (EPUB is a zip of XHTML) and URL article extraction.
+    // EPUB parsing (zip of XHTML) and stripping MOBI's embedded HTML down to plain text.
     implementation("org.jsoup:jsoup:1.17.2")
 
     // PDF text extraction (fixed-layout PDF -> reflowable text).
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-
-    // URL ingestion networking.
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 

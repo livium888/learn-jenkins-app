@@ -9,8 +9,10 @@ data class ParsedDocument(val title: String, val text: String)
 /**
  * Parses a whole book file (opened via the Storage Access Framework, never
  * copy/paste) into plain reflowable text for the reader + term scanner.
+ * Sealed so callers can exhaustively `when` over the exact 3 supported
+ * formats (PDF, EPUB, MOBI) without a fallback `else` branch.
  */
-interface FileDocumentParser {
+sealed interface FileDocumentParser {
     suspend fun parse(context: Context, uri: Uri, displayName: String): ParsedDocument
 }
 
@@ -24,10 +26,9 @@ object ParserRegistry {
 
     fun forUri(context: Context, uri: Uri, displayName: String): FileDocumentParser? {
         return when (extensionOf(context, uri, displayName)) {
-            "txt", "text" -> TxtParser()
             "epub" -> EpubParser()
             "pdf" -> PdfParser()
-            "mobi", "azw", "azw3", "kfx" -> MobiParser()
+            "mobi", "azw", "azw3" -> MobiParser()
             else -> null
         }
     }
