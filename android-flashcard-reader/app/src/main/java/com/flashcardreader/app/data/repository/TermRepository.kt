@@ -4,6 +4,7 @@ import com.flashcardreader.app.data.db.dao.OccurrenceDao
 import com.flashcardreader.app.data.db.dao.TermDao
 import com.flashcardreader.app.data.db.entities.Occurrence
 import com.flashcardreader.app.data.db.entities.Term
+import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Fsrs
 import com.flashcardreader.app.data.fsrs.Rating
 import kotlinx.coroutines.flow.Flow
@@ -58,9 +59,19 @@ class TermRepository(
         )
     }
 
-    /** Applies the user's flashcard answer, advancing the FSRS schedule for next time. */
-    suspend fun submitReview(term: Term, rating: Rating): Term {
-        val updated = fsrs.review(term, rating, System.currentTimeMillis())
+    /**
+     * Applies the user's flashcard answer, advancing the FSRS schedule, and records the
+     * hypercorrection flag: being confident but wrong sets it; getting it right (Good/Easy)
+     * clears it; anything else leaves it unchanged.
+     */
+    suspend fun submitReview(term: Term, rating: Rating, confidence: Confidence): Term {
+        val scheduled = fsrs.review(term, rating, System.currentTimeMillis())
+        val hyperMiss = when {
+            confidence == Confidence.CONFIDENT && rating == Rating.AGAIN -> true
+            rating == Rating.GOOD || rating == Rating.EASY -> false
+            else -> term.hyperMiss
+        }
+        val updated = scheduled.copy(hyperMiss = hyperMiss)
         termDao.update(updated)
         return updated
     }

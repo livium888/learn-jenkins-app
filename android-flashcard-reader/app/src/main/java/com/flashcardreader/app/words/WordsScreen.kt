@@ -85,8 +85,12 @@ private fun WordRow(term: Term, onEdit: () -> Unit, onDelete: () -> Unit) {
             append(if (term.lapses == 1) "lapse" else "lapses")
         }
     }
+    val prefix = buildString {
+        if (term.curious) append("★ ")
+        if (term.hyperMiss) append("⚠ ")
+    }
     ListItem(
-        headlineContent = { Text(if (term.curious) "★ ${term.displayText}" else term.displayText) },
+        headlineContent = { Text("$prefix${term.displayText}") },
         supportingContent = {
             Column {
                 Text(term.definition.ifBlank { "(no definition - tap to add one)" })

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.Term
+import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Fsrs
 import com.flashcardreader.app.data.fsrs.Rating
 import com.flashcardreader.app.data.repository.LibraryRepository
@@ -119,10 +120,10 @@ class ReaderViewModel(
         }
     }
 
-    fun answerFlashcard(rating: Rating) {
+    fun answerFlashcard(rating: Rating, confidence: Confidence) {
         val match = _uiState.value.pendingFlashcards.firstOrNull() ?: return
         viewModelScope.launch {
-            val updated = termRepository.submitReview(match.term, rating)
+            val updated = termRepository.submitReview(match.term, rating, confidence)
             _uiState.update { s ->
                 s.copy(
                     pendingFlashcards = s.pendingFlashcards.drop(1),

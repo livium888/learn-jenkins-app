@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -22,6 +25,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.flashcardreader.app.data.db.entities.Term
+import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.IntervalFormat
 import com.flashcardreader.app.data.fsrs.Rating
 
@@ -36,12 +40,15 @@ import com.flashcardreader.app.data.fsrs.Rating
  * A card with no usable context sentence always uses definition recall.
  */
 @Composable
-fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Rating) -> Unit) {
+fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Rating, Confidence) -> Unit) {
     var revealed by remember(term.id) { mutableStateOf(false) }
     // Effortful retrieval: producing the answer yourself (typing it) before revealing
     // encodes far better than passively recognizing it (generation + production effect).
     // Kept optional - you can still Reveal without typing - so it nudges without blocking.
     var typed by remember(term.id) { mutableStateOf("") }
+    // Confidence captured BEFORE the reveal - so we can detect high-confidence errors
+    // (the hypercorrection effect) and train metacognitive calibration.
+    var confidence by remember(term.id) { mutableStateOf(Confidence.UNSURE) }
 
     // Alternate cue by review count so a given card isn't always the same question type.
     // reps is the count BEFORE this review, so a NEW card (0) starts with definition recall.
@@ -96,6 +103,24 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
                         Text(term.definition.ifBlank { "(no definition saved)" })
                     }
                 }
+
+                if (!revealed) {
+                    Text("How sure are you?", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Confidence.values().forEach { level ->
+                            FilterChip(
+                                selected = confidence == level,
+                                onClick = { confidence = level },
+                                label = { Text(level.name.lowercase().replaceFirstChar(Char::uppercase)) },
+                            )
+                        }
+                    }
+                } else if (confidence == Confidence.CONFIDENT) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("You felt sure — if you were wrong, this one will stick") },
+                    )
+                }
             }
         },
         confirmButton = {
@@ -107,16 +132,16 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
                     // Each button shows when you'd next see this word if you pick it, so the
                     // spaced-repetition consequence of each rating is visible before tapping.
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = { onAnswered(Rating.AGAIN) }, modifier = Modifier.fillMaxWidth()) {
+                        Button(onClick = { onAnswered(Rating.AGAIN, confidence) }, modifier = Modifier.fillMaxWidth()) {
                             Text("Forgot it  ·  ${IntervalFormat.nextLabel(term, Rating.AGAIN)}")
                         }
-                        OutlinedButton(onClick = { onAnswered(Rating.HARD) }, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { onAnswered(Rating.HARD, confidence) }, modifier = Modifier.fillMaxWidth()) {
                             Text("Hard  ·  ${IntervalFormat.nextLabel(term, Rating.HARD)}")
                         }
-                        OutlinedButton(onClick = { onAnswered(Rating.GOOD) }, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { onAnswered(Rating.GOOD, confidence) }, modifier = Modifier.fillMaxWidth()) {
                             Text("Good  ·  ${IntervalFormat.nextLabel(term, Rating.GOOD)}")
                         }
-                        OutlinedButton(onClick = { onAnswered(Rating.EASY) }, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { onAnswered(Rating.EASY, confidence) }, modifier = Modifier.fillMaxWidth()) {
                             Text("Easy  ·  ${IntervalFormat.nextLabel(term, Rating.EASY)}")
                         }
                     }

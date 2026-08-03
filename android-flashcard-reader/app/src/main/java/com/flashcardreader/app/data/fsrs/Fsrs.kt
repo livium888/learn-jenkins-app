@@ -8,6 +8,9 @@ import kotlin.math.pow
 /** How the user answered a flashcard, same 4-point scale Anki/FSRS use. */
 enum class Rating(val value: Int) { AGAIN(1), HARD(2), GOOD(3), EASY(4) }
 
+/** How sure the user felt before revealing - used to detect high-confidence errors. */
+enum class Confidence { GUESSING, UNSURE, CONFIDENT }
+
 /**
  * Kotlin implementation of the FSRS (Free Spaced Repetition Scheduler) algorithm
  * from the open-spaced-repetition project (https://github.com/open-spaced-repetition).

@@ -3,6 +3,7 @@ package com.flashcardreader.app.reader
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.data.db.entities.Term
+import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Rating
 import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.repository.TermRepository
@@ -58,10 +59,10 @@ class ReviewViewModel(
         }
     }
 
-    fun answerCurrent(rating: Rating) {
+    fun answerCurrent(rating: Rating, confidence: Confidence) {
         val term = _uiState.value.queue.firstOrNull() ?: return
         viewModelScope.launch {
-            termRepository.submitReview(term, rating)
+            termRepository.submitReview(term, rating, confidence)
             _uiState.update { it.copy(queue = it.queue.drop(1)) }
             loadContextForCurrent()
         }

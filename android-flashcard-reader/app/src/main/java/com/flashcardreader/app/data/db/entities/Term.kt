@@ -38,6 +38,9 @@ data class Term(
     val curious: Boolean = false,
     /** "Why does this matter to me?" - the self-reference effect, a strong encoding boost. */
     val selfNote: String = "",
+    /** Set when you were confident but got it wrong - the hypercorrection effect: such
+     * errors, once corrected, are unusually well remembered, so they're worth flagging. */
+    val hyperMiss: Boolean = false,
 )
 
 enum class CardState { NEW, LEARNING, REVIEW, RELEARNING }
