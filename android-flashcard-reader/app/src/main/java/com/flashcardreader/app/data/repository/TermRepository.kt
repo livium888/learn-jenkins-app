@@ -59,4 +59,7 @@ class TermRepository(
         termDao.update(updated)
         return updated
     }
+
+    /** Most recent sighting of a term, used to pull up its context sentence outside of active reading. */
+    suspend fun latestOccurrence(termId: Long): Occurrence? = occurrenceDao.forTerm(termId).firstOrNull()
 }

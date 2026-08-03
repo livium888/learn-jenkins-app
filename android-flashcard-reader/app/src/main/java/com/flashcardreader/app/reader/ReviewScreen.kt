@@ -32,7 +32,7 @@ fun ReviewScreen(viewModel: ReviewViewModel, onBack: () -> Unit) {
             when {
                 state.loading -> Text("Loading...", Modifier.align(Alignment.Center))
                 current == null -> Text("Nothing due right now - nice work.", Modifier.align(Alignment.Center))
-                else -> FlashcardDialog(term = current, onAnswered = viewModel::answerCurrent)
+                else -> FlashcardDialog(term = current, contextSentence = state.contextSentence, onAnswered = viewModel::answerCurrent)
             }
         }
     }
