@@ -43,7 +43,47 @@ class LibraryRepository(
 
     suspend fun delete(source: Source) {
         File(source.textFilePath).delete()
+        pageCacheFile(source).delete()
         sourceDao.delete(source.id)
+    }
+
+    private fun pageCacheFile(source: Source): File =
+        File("${source.textFilePath.removeSuffix(".txt")}.pagecache")
+
+    /**
+     * Re-paginating a whole book (walking every character, measuring line
+     * breaks) is real work - fine once, wasteful every time you reopen the
+     * same book with unchanged font/size/line-height/screen size. [signature]
+     * identifies that combination; a mismatch (different font size, rotated
+     * device, etc.) just means a cache miss, not a correctness problem.
+     */
+    suspend fun loadCachedPageOffsets(source: Source, signature: String): List<Pair<Int, Int>>? =
+        withContext(Dispatchers.IO) {
+            val file = pageCacheFile(source)
+            if (!file.exists()) return@withContext null
+            val lines = file.readLines()
+            if (lines.isEmpty() || lines[0] != signature) return@withContext null
+            val offsets = lines.drop(1).mapNotNull { line ->
+                val parts = line.split(',')
+                if (parts.size != 2) return@mapNotNull null
+                val start = parts[0].toIntOrNull() ?: return@mapNotNull null
+                val end = parts[1].toIntOrNull() ?: return@mapNotNull null
+                start to end
+            }
+            offsets.takeIf { it.isNotEmpty() }
+        }
+
+    suspend fun savePageOffsetsCache(source: Source, signature: String, offsets: List<Pair<Int, Int>>) {
+        withContext(Dispatchers.IO) {
+            pageCacheFile(source).bufferedWriter().use { writer ->
+                writer.write(signature)
+                writer.newLine()
+                for ((start, end) in offsets) {
+                    writer.write("$start,$end")
+                    writer.newLine()
+                }
+            }
+        }
     }
 
     /** Imports a book file the user picked via the system file picker (SAF) - never copy/paste. */

@@ -1,5 +1,7 @@
 package com.flashcardreader.app.reader
 
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Constraints
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.data.db.entities.Source
@@ -10,10 +12,13 @@ import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.repository.TermRepository
 import com.flashcardreader.app.theme.ReaderPrefs
 import com.flashcardreader.app.theme.ReaderTypography
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class ReaderUiState(
     val source: Source? = null,
@@ -21,6 +26,10 @@ data class ReaderUiState(
     val terms: List<Term> = emptyList(),
     val pages: List<Page> = emptyList(),
     val currentPageIndex: Int = 0,
+    /** True while (re)computing page breaks - the previous page stays on screen meanwhile. */
+    val pagesLoading: Boolean = false,
+    /** Identifies which font/size/line-height/viewport the current [pages] were computed for. */
+    val pagesSignature: String? = null,
     /** Due flashcards found on the page we're about to reveal. Non-empty = block navigation. */
     val pendingFlashcards: List<TermMatch> = emptyList(),
     val pendingTargetPageIndex: Int? = null,
@@ -39,27 +48,62 @@ class ReaderViewModel(
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState: StateFlow<ReaderUiState> = _uiState
 
+    /** Guards against an older, slower loadPages() call overwriting a newer one's result. */
+    private var pageLoadGeneration = 0
+
     init {
         viewModelScope.launch {
             val source = libraryRepository.getSource(sourceId)
             val text = source?.let { libraryRepository.readText(it) } ?: ""
             val terms = termRepository.allTerms()
-            _uiState.update { it.copy(source = source, fullText = text, terms = terms, loading = false) }
-        }
-        viewModelScope.launch {
-            readerPrefs.typography.collect { typography ->
-                _uiState.update { it.copy(typography = typography) }
+            // One-shot read, not a continuous collect: typography changes are applied to
+            // _uiState immediately by updateTypography() below, so re-observing DataStore
+            // here would just re-deliver (with disk-write latency) what we already set.
+            val typography = readerPrefs.typography.first()
+            _uiState.update {
+                it.copy(source = source, fullText = text, terms = terms, typography = typography, loading = false)
             }
         }
     }
 
-    /** Called by the screen once it has measured pages for the current viewport/typography. */
-    fun onPagesComputed(pages: List<Page>) {
-        val source = _uiState.value.source ?: return
-        val startIndex = pages.indexOfFirst { it.endChar > source.lastPositionChar }
-            .let { if (it < 0) 0 else it }
-        _uiState.update { it.copy(pages = pages, currentPageIndex = startIndex) }
-        scanCurrentPageForDueTerms()
+    /**
+     * Computes (or reuses a cached) page-break list for the given viewport/typography.
+     * Runs the actual text measurement off the main thread and persists the result so
+     * reopening this book with the same settings/screen size is instant next time -
+     * without this, every open (and every settings tweak) re-measures the whole book.
+     */
+    fun loadPages(
+        measure: (String, Constraints) -> TextLayoutResult,
+        widthPx: Int,
+        heightPx: Int,
+        typography: ReaderTypography,
+    ) {
+        val state = _uiState.value
+        val source = state.source ?: return
+        val signature = "${typography.font.name}|${typography.fontSizeSp}|${typography.lineHeightMultiplier}|$widthPx|$heightPx"
+        if (signature == state.pagesSignature && state.pages.isNotEmpty()) return
+        val myGeneration = ++pageLoadGeneration
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(pagesLoading = true) }
+            val cached = libraryRepository.loadCachedPageOffsets(source, signature)
+            val pages = if (cached != null) {
+                cached.map { (start, end) -> Page(start, end) }
+            } else {
+                withContext(Dispatchers.Default) {
+                    ReaderPaginator.paginate(state.fullText, measure, widthPx, heightPx)
+                }.also { computed ->
+                    libraryRepository.savePageOffsetsCache(source, signature, computed.map { it.startChar to it.endChar })
+                }
+            }
+            if (myGeneration != pageLoadGeneration) return@launch // a newer request already superseded this one
+            val startIndex = pages.indexOfFirst { it.endChar > source.lastPositionChar }
+                .let { if (it < 0) 0 else it }
+            _uiState.update {
+                it.copy(pages = pages, currentPageIndex = startIndex, pagesLoading = false, pagesSignature = signature)
+            }
+            scanCurrentPageForDueTerms()
+        }
     }
 
     private fun pageText(index: Int): String {
@@ -151,7 +195,13 @@ class ReaderViewModel(
         }
     }
 
+    /**
+     * Applied to the UI immediately (no waiting on disk I/O) so sliders/chips in the
+     * settings sheet track the user's finger in real time; the DataStore write happens
+     * in the background purely for persistence across app restarts.
+     */
     fun updateTypography(typography: ReaderTypography) {
+        _uiState.update { it.copy(typography = typography) }
         viewModelScope.launch { readerPrefs.update(typography) }
     }
 }

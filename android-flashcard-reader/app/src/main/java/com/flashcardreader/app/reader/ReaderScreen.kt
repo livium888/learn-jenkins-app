@@ -16,6 +16,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.theme.colorsFor
+import kotlinx.coroutines.delay
 
 /** What the add/edit-flashcard dialog is currently prefilled with, or null if closed. */
 private data class FlashcardPrefill(val term: String, val definition: String)
@@ -96,17 +98,23 @@ fun ReaderScreen(
                 color = colors.text,
             )
 
-            LaunchedEffect(state.fullText, typography, widthPx, heightPx) {
+            // Keyed on the font/size/line-height/viewport - deliberately NOT on
+            // typography.palette, since a theme/color change never affects line
+            // breaks and shouldn't trigger a (potentially slow, for a big book)
+            // re-pagination. The debounce delay matters: a settings Slider fires
+            // onValueChange on every pixel of a drag, and loadPages() runs on
+            // viewModelScope (independent of this LaunchedEffect), so without it,
+            // dragging a slider on a big book would fire off dozens of overlapping,
+            // uncancelled re-pagination passes instead of just the final value.
+            LaunchedEffect(state.fullText, typography.font, typography.fontSizeSp, typography.lineHeightMultiplier, widthPx, heightPx) {
                 if (widthPx <= 0 || heightPx <= 0) return@LaunchedEffect
-                val pages = ReaderPaginator.paginate(
-                    text = state.fullText,
-                    measure = { chunk, constraints ->
-                        measurer.measure(chunk, style, constraints = constraints)
-                    },
-                    maxWidthPx = widthPx,
-                    maxHeightPx = heightPx,
+                delay(300)
+                viewModel.loadPages(
+                    measure = { chunk, constraints -> measurer.measure(chunk, style, constraints = constraints) },
+                    widthPx = widthPx,
+                    heightPx = heightPx,
+                    typography = typography,
                 )
-                viewModel.onPagesComputed(pages)
             }
 
             val page = state.pages.getOrNull(state.currentPageIndex)
@@ -140,6 +148,10 @@ fun ReaderScreen(
                         }
                     },
             )
+
+            if (state.pagesLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
         }
 
         state.pendingFlashcards.firstOrNull()?.let { match ->
