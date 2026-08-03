@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -31,8 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -121,32 +124,77 @@ fun ReaderScreen(
             val page = state.pages.getOrNull(state.currentPageIndex)
             val pageText = if (page != null) state.fullText.substring(page.startChar, page.endChar) else ""
 
-            // Tap left third = previous page, right third = next page (standard e-reader
-            // paging), middle third = tap a word directly to add/edit its flashcard. This
-            // pointerInput sits on the Text itself (not a wrapping Box) so tap offsets line
-            // up with TextLayoutResult's own coordinate space for word-hit-testing.
+            // A word can wrap to any position on the page (including right against the
+            // left/right edges), so paging by screen-position "zones" fought with tapping
+            // words. Instead we separate gestures by *type*, on two independent detectors:
+            //   - horizontal swipe  -> turn the page (right = back, left = forward)
+            //   - long-press a word -> highlight it and open its add/edit flashcard
+            //   - plain tap         -> clear any lingering highlight
+            // The word highlights the instant the finger lands (pressing) and stays
+            // highlighted after the dialog closes (selected) until the next tap, so the
+            // gesture always has visible feedback rather than a silent wait.
+            var pressingRange by remember(pageText) { mutableStateOf<IntRange?>(null) }
+            var selectedRange by remember(pageText) { mutableStateOf<IntRange?>(null) }
+
+            val annotated = remember(pageText, pressingRange, selectedRange, colors.accent) {
+                buildAnnotatedString {
+                    append(pageText)
+                    selectedRange?.let { r ->
+                        val end = (r.last + 1).coerceAtMost(pageText.length)
+                        if (r.first in 0 until end) addStyle(SpanStyle(background = colors.accent.copy(alpha = 0.32f)), r.first, end)
+                    }
+                    pressingRange?.let { r ->
+                        val end = (r.last + 1).coerceAtMost(pageText.length)
+                        if (r.first in 0 until end) addStyle(SpanStyle(background = colors.accent.copy(alpha = 0.18f)), r.first, end)
+                    }
+                }
+            }
+
             Text(
-                text = pageText,
+                text = annotated,
                 style = style,
                 onTextLayout = { textLayout = it },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(24.dp)
-                    .pointerInput(state.currentPageIndex, pageText) {
-                        detectTapGestures { offset ->
-                            when {
-                                offset.x < size.width / 3f -> viewModel.goToPreviousPage()
-                                offset.x > size.width * 2f / 3f -> viewModel.goToNextPage()
-                                else -> {
-                                    val layout = textLayout ?: return@detectTapGestures
-                                    val charIndex = layout.getOffsetForPosition(offset)
-                                    wordAt(pageText, charIndex)?.let { word ->
-                                        val existing = state.terms.find { it.normalizedText == word.lowercase() }
-                                        flashcardPrefill = FlashcardPrefill(word, existing?.definition.orEmpty())
-                                    }
-                                }
-                            }
+                    // Page-turn: a real horizontal swipe, not a screen region.
+                    .pointerInput(state.currentPageIndex, state.pages.size) {
+                        var totalDx = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { totalDx = 0f },
+                            onDragEnd = {
+                                val threshold = size.width * 0.12f
+                                if (totalDx <= -threshold) viewModel.goToNextPage()
+                                else if (totalDx >= threshold) viewModel.goToPreviousPage()
+                            },
+                            onDragCancel = { totalDx = 0f },
+                        ) { change, dragAmount ->
+                            totalDx += dragAmount
+                            change.consume()
                         }
+                    }
+                    // Word selection: long-press highlights + opens the flashcard; a plain
+                    // tap clears the highlight. onPress gives touch-down feedback immediately.
+                    .pointerInput(state.currentPageIndex, pageText) {
+                        detectTapGestures(
+                            onPress = { offset ->
+                                val layout = textLayout
+                                pressingRange = layout?.let { wordRangeAt(pageText, it.getOffsetForPosition(offset)) }
+                                tryAwaitRelease()
+                                pressingRange = null
+                            },
+                            onTap = { selectedRange = null },
+                            onLongPress = { offset ->
+                                val layout = textLayout
+                                val range = layout?.let { wordRangeAt(pageText, it.getOffsetForPosition(offset)) }
+                                if (range != null) {
+                                    selectedRange = range
+                                    val word = pageText.substring(range.first, (range.last + 1).coerceAtMost(pageText.length))
+                                    val existing = state.terms.find { it.normalizedText == word.lowercase() }
+                                    flashcardPrefill = FlashcardPrefill(word, existing?.definition.orEmpty())
+                                }
+                            },
+                        )
                     },
             )
 
@@ -181,8 +229,8 @@ fun ReaderScreen(
     }
 }
 
-/** Expands a tap's character offset to the word it landed on, or null if it hit whitespace/punctuation. */
-private fun wordAt(text: String, index: Int): String? {
+/** The char range (first..last inclusive) of the word at [index], or null if it hit whitespace/punctuation. */
+private fun wordRangeAt(text: String, index: Int): IntRange? {
     if (text.isEmpty()) return null
     val i = index.coerceIn(0, text.length - 1)
     fun isWordChar(c: Char) = c.isLetterOrDigit() || c == '\''
@@ -191,7 +239,7 @@ private fun wordAt(text: String, index: Int): String? {
     while (start > 0 && isWordChar(text[start - 1])) start--
     var end = i
     while (end < text.length - 1 && isWordChar(text[end + 1])) end++
-    return text.substring(start, end + 1)
+    return start..end
 }
 
 private fun clipboardText(context: Context): String {
