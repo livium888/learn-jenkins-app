@@ -113,6 +113,7 @@ class ReaderViewModel(
         if (prev < 0) return
         _uiState.update { it.copy(currentPageIndex = prev) }
         persistPosition()
+        scanCurrentPageForDueTerms()
     }
 
     fun answerFlashcard(rating: Rating) {
@@ -140,7 +141,12 @@ class ReaderViewModel(
 
     fun createFlashcard(selectedText: String, definition: String) {
         viewModelScope.launch {
-            termRepository.createOrGetTerm(selectedText, definition)
+            val term = termRepository.createOrGetTerm(selectedText, definition)
+            // createOrGetTerm reuses an existing card if this word is already tracked
+            // (without overwriting it) - if the user edited the definition, save that.
+            if (definition.isNotBlank() && definition != term.definition) {
+                termRepository.updateDefinition(term, definition)
+            }
             _uiState.update { it.copy(terms = termRepository.allTerms()) }
         }
     }

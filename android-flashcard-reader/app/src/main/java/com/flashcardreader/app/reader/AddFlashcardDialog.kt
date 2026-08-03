@@ -14,23 +14,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 
 /**
- * Long-press-select a word/phrase in the reader, hit "Add Flashcard", and
- * write your own definition here - no copy/paste round trips into another
- * app. [prefilledText] comes from the current text selection (or the system
- * clipboard if the user used the native "Copy" action first).
+ * Tap a word in the reader (or use the "+" button for anything not on
+ * screen) and write your own definition here - no copy/paste round trip
+ * into another app. If the word is already tracked, [prefilledDefinition]
+ * carries its existing definition so this doubles as an edit screen.
  */
 @Composable
 fun AddFlashcardDialog(
     prefilledText: String,
+    prefilledDefinition: String = "",
     onDismiss: () -> Unit,
     onSave: (term: String, definition: String) -> Unit,
 ) {
     var term by remember { mutableStateOf(prefilledText) }
-    var definition by remember { mutableStateOf("") }
+    var definition by remember { mutableStateOf(prefilledDefinition) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add flashcard") },
+        title = { Text(if (prefilledDefinition.isBlank()) "Add flashcard" else "Edit flashcard") },
         text = {
             Column {
                 OutlinedTextField(

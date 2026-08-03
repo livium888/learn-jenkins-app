@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
@@ -30,11 +29,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.theme.colorsFor
+
+/** What the add/edit-flashcard dialog is currently prefilled with, or null if closed. */
+private data class FlashcardPrefill(val term: String, val definition: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,7 +53,8 @@ fun ReaderScreen(
     val context = LocalContext.current
 
     var showSettings by remember { mutableStateOf(false) }
-    var showAddFlashcard by remember { mutableStateOf(false) }
+    var flashcardPrefill by remember { mutableStateOf<FlashcardPrefill?>(null) }
+    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
 
     Scaffold(
         topBar = {
@@ -65,7 +69,9 @@ fun ReaderScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddFlashcard = true }) {
+            FloatingActionButton(
+                onClick = { flashcardPrefill = FlashcardPrefill(clipboardText(context), "") },
+            ) {
                 Icon(Icons.Filled.Add, contentDescription = "Add flashcard")
             }
         },
@@ -106,23 +112,34 @@ fun ReaderScreen(
             val page = state.pages.getOrNull(state.currentPageIndex)
             val pageText = if (page != null) state.fullText.substring(page.startChar, page.endChar) else ""
 
-            Box(
-                Modifier
+            // Tap left third = previous page, right third = next page (standard e-reader
+            // paging), middle third = tap a word directly to add/edit its flashcard. This
+            // pointerInput sits on the Text itself (not a wrapping Box) so tap offsets line
+            // up with TextLayoutResult's own coordinate space for word-hit-testing.
+            Text(
+                text = pageText,
+                style = style,
+                onTextLayout = { textLayout = it },
+                modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(state.currentPageIndex) {
+                    .padding(24.dp)
+                    .pointerInput(state.currentPageIndex, pageText) {
                         detectTapGestures { offset ->
-                            if (offset.x < size.width / 3f) {
-                                viewModel.goToPreviousPage()
-                            } else if (offset.x > size.width * 2f / 3f) {
-                                viewModel.goToNextPage()
+                            when {
+                                offset.x < size.width / 3f -> viewModel.goToPreviousPage()
+                                offset.x > size.width * 2f / 3f -> viewModel.goToNextPage()
+                                else -> {
+                                    val layout = textLayout ?: return@detectTapGestures
+                                    val charIndex = layout.getOffsetForPosition(offset)
+                                    wordAt(pageText, charIndex)?.let { word ->
+                                        val existing = state.terms.find { it.normalizedText == word.lowercase() }
+                                        flashcardPrefill = FlashcardPrefill(word, existing?.definition.orEmpty())
+                                    }
+                                }
                             }
                         }
                     },
-            ) {
-                SelectionContainer {
-                    Text(text = pageText, style = style, modifier = Modifier.padding(24.dp))
-                }
-            }
+            )
         }
 
         state.pendingFlashcards.firstOrNull()?.let { match ->
@@ -137,18 +154,31 @@ fun ReaderScreen(
             )
         }
 
-        if (showAddFlashcard) {
-            val clipboardText = remember { clipboardText(context) }
+        flashcardPrefill?.let { prefill ->
             AddFlashcardDialog(
-                prefilledText = clipboardText,
-                onDismiss = { showAddFlashcard = false },
+                prefilledText = prefill.term,
+                prefilledDefinition = prefill.definition,
+                onDismiss = { flashcardPrefill = null },
                 onSave = { term, definition ->
                     viewModel.createFlashcard(term, definition)
-                    showAddFlashcard = false
+                    flashcardPrefill = null
                 },
             )
         }
     }
+}
+
+/** Expands a tap's character offset to the word it landed on, or null if it hit whitespace/punctuation. */
+private fun wordAt(text: String, index: Int): String? {
+    if (text.isEmpty()) return null
+    val i = index.coerceIn(0, text.length - 1)
+    fun isWordChar(c: Char) = c.isLetterOrDigit() || c == '\''
+    if (!isWordChar(text[i])) return null
+    var start = i
+    while (start > 0 && isWordChar(text[start - 1])) start--
+    var end = i
+    while (end < text.length - 1 && isWordChar(text[end + 1])) end++
+    return text.substring(start, end + 1)
 }
 
 private fun clipboardText(context: Context): String {
