@@ -12,6 +12,9 @@ on:
 jobs:
   build-debug-apk:
     runs-on: ubuntu-latest
+    # Needed so the release step below can create/update a GitHub Release.
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: android-flashcard-reader
@@ -30,9 +33,28 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload debug APK
+      # Kept for anyone browsing the Actions run on desktop.
+      - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: flashcard-reader-debug-apk
           path: android-flashcard-reader/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      # The reliable way to get the APK onto a phone: a Release asset is a raw,
+      # directly-downloadable .apk on a public repo - no GitHub login, no browser
+      # verification wall, no zip. Uses a rolling tag so the "latest release"
+      # download link below always points at the newest build.
+      - name: Publish APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: debug-latest
+          name: Flashcard Reader - latest debug build
+          body: >-
+            Direct APK download for sideloading. On a phone, tap the app-debug.apk
+            asset below to install. Google Play Protect will warn about an
+            unrecognized developer (normal for a self-signed debug app) - choose
+            "More details" then "Install anyway".
+          prerelease: false
+          make_latest: true
+          files: android-flashcard-reader/app/build/outputs/apk/debug/app-debug.apk
