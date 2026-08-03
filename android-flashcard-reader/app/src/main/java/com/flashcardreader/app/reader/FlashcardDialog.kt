@@ -4,30 +4,39 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.flashcardreader.app.ai.AiPrefs
+import com.flashcardreader.app.ai.GeminiTutor
 import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.IntervalFormat
+import kotlinx.coroutines.launch
 import com.flashcardreader.app.data.fsrs.Rating
 
 /**
@@ -51,6 +60,13 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
     // (the hypercorrection effect) and train metacognitive calibration.
     var confidence by remember(term.id) { mutableStateOf(Confidence.UNSURE) }
 
+    // Optional AI tutor: after the reveal, evaluate the learner's typed guess.
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val aiReady = remember { AiPrefs(context).isReady }
+    var aiLoading by remember(term.id) { mutableStateOf(false) }
+    var aiResult by remember(term.id) { mutableStateOf<String?>(null) }
+
     // Adaptive difficulty (the spirit of the 85% rule): scale the cue to how well you know
     // the word. While it's still being learned you get the easier recognition cue
     // (definition recall); once it's established (in the REVIEW state with a couple of reps)
@@ -67,7 +83,10 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
         onDismissRequest = { /* not dismissible - must answer to keep reading */ },
         title = { Text(if (isCloze) "Fill in the blank" else "What does \"${term.displayText}\" mean?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            ) {
                 if (isCloze) {
                     Text(
                         text = "“$cloze”",
@@ -126,6 +145,26 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
                         onClick = {},
                         label = { Text("You felt sure — if you were wrong, this one will stick") },
                     )
+                }
+
+                if (revealed && aiReady) {
+                    if (aiResult == null && !aiLoading) {
+                        TextButton(onClick = {
+                            aiLoading = true
+                            scope.launch {
+                                val result = GeminiTutor.evaluateGuess(context, term.displayText, contextSentence, typed)
+                                aiResult = result.getOrElse { "Couldn't reach the AI: ${it.message}" }
+                                aiLoading = false
+                            }
+                        }) { Text("Check my guess with AI") }
+                    }
+                    if (aiLoading) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircularProgressIndicator(modifier = Modifier.padding(2.dp))
+                            Text("Asking the tutor…")
+                        }
+                    }
+                    aiResult?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                 }
             }
         },
