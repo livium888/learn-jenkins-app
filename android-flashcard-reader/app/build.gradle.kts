@@ -12,8 +12,29 @@ android {
         applicationId = "com.flashcardreader.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
+    }
+
+    // A single, committed signing key so every build - CI or local - signs with the
+    // SAME key. Android only allows an in-place update when the new APK's signature
+    // matches the installed one; without this, each CI runner generated a random
+    // debug key, so every APK forced an uninstall (wiping saved flashcards). This is
+    // a throwaway debug key for personal sideloading, not a Play Store release key,
+    // so keeping it in the repo is intentional.
+    signingConfigs {
+        create("stable") {
+            storeFile = file("flashcard-debug.keystore")
+            storePassword = "flashcardreader"
+            keyAlias = "flashcard"
+            keyPassword = "flashcardreader"
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("stable")
+        }
     }
 
     buildFeatures {
