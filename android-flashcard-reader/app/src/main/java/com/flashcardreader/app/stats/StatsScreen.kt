@@ -1,5 +1,8 @@
 package com.flashcardreader.app.stats
 
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,14 +16,21 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.flashcardreader.app.reminders.ReminderScheduler
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +73,9 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
             SectionLabel("Flagged")
             StatRow("★ Curious", stats.curious.toString())
             StatRow("⚠ High-confidence misses", stats.hyperMiss.toString())
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+            ReminderToggle()
 
             Text(
                 "Retention is a rough proxy (1 − lapses ÷ reviews). It sharpens as you review more.",
@@ -70,6 +83,46 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                 modifier = Modifier.padding(top = 12.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun ReminderToggle() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(ReminderScheduler.isEnabled(context)) }
+
+    // Turning reminders on needs the Android 13+ notification permission first.
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        enabled = granted
+        ReminderScheduler.setEnabled(context, granted)
+    }
+
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Evening + morning review reminders", style = MaterialTheme.typography.bodyLarge)
+            Switch(
+                checked = enabled,
+                onCheckedChange = { wantOn ->
+                    if (wantOn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        enabled = wantOn
+                        ReminderScheduler.setEnabled(context, wantOn)
+                    }
+                },
+            )
+        }
+        Text(
+            "Nudges a quick review before bed and after waking, when memory consolidates. " +
+                "Timing is best-effort and can be delayed by battery settings.",
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
 }
 
