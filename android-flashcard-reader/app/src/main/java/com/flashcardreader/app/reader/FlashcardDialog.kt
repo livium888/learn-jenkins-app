@@ -9,6 +9,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,6 +38,10 @@ import com.flashcardreader.app.data.fsrs.Rating
 @Composable
 fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Rating) -> Unit) {
     var revealed by remember(term.id) { mutableStateOf(false) }
+    // Effortful retrieval: producing the answer yourself (typing it) before revealing
+    // encodes far better than passively recognizing it (generation + production effect).
+    // Kept optional - you can still Reveal without typing - so it nudges without blocking.
+    var typed by remember(term.id) { mutableStateOf("") }
 
     // Alternate cue by review count so a given card isn't always the same question type.
     // reps is the count BEFORE this review, so a NEW card (0) starts with definition recall.
@@ -55,8 +60,17 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
                         text = "“$cloze”",
                         style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
                     )
-                    Text("Recall the missing word.")
-                    if (revealed) {
+                    if (!revealed) {
+                        Text("Recall the missing word.")
+                        OutlinedTextField(
+                            value = typed,
+                            onValueChange = { typed = it },
+                            label = { Text("Your answer (optional)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        if (typed.isNotBlank()) Text("You wrote: $typed", style = MaterialTheme.typography.bodySmall)
                         HorizontalDivider(Modifier.padding(vertical = 4.dp))
                         Text(term.displayText, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                         if (term.definition.isNotBlank()) Text(term.definition)
@@ -68,8 +82,16 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
                             style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
                         )
                     }
-                    Text("Try to recall your own definition before revealing it.")
-                    if (revealed) {
+                    if (!revealed) {
+                        Text("Recall what it means before revealing.")
+                        OutlinedTextField(
+                            value = typed,
+                            onValueChange = { typed = it },
+                            label = { Text("Your answer (optional)") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        if (typed.isNotBlank()) Text("You wrote: $typed", style = MaterialTheme.typography.bodySmall)
                         HorizontalDivider(Modifier.padding(vertical = 4.dp))
                         Text(term.definition.ifBlank { "(no definition saved)" })
                     }
