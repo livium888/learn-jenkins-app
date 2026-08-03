@@ -5,18 +5,22 @@ import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
-import org.w3c.dom.Element
-import org.xml.sax.InputSource
-import java.io.ByteArrayInputStream
-import java.io.StringReader
+import org.jsoup.parser.Parser
+import java.net.URLDecoder
 import java.util.zip.ZipInputStream
-import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * EPUB is just a zip of XHTML + an OPF manifest describing reading order.
  * We read the whole archive into memory (fine for typical ebook sizes),
  * resolve the spine (correct page order - NOT just alphabetical zip order),
  * and concatenate each chapter's text with paragraph breaks preserved.
+ *
+ * All XML here (container.xml, the OPF, and the chapters) is parsed with Jsoup
+ * rather than javax.xml's DocumentBuilder. Android's built-in DOM parser is
+ * inconsistent across OS versions and rejects perfectly valid EPUBs with errors
+ * like "the parser does not support specification 'unknown' version '0.0'";
+ * Jsoup is lenient about XML declarations / DOCTYPEs / namespaces and never
+ * resolves external entities or DTDs, so it also sidesteps XXE entirely.
  */
 class EpubParser : FileDocumentParser {
 
@@ -27,7 +31,8 @@ class EpubParser : FileDocumentParser {
             val containerXml = entries["META-INF/container.xml"]
                 ?: throw IllegalStateException("Not a valid EPUB: missing container.xml")
             val opfPath = findOpfPath(containerXml)
-            val opfBytes = entries[opfPath]
+                ?: throw IllegalStateException("Not a valid EPUB: no OPF rootfile in container.xml")
+            val opfBytes = entries[opfPath] ?: entries[decode(opfPath)]
                 ?: throw IllegalStateException("Not a valid EPUB: missing OPF at $opfPath")
             val opfDir = opfPath.substringBeforeLast('/', "")
 
@@ -35,8 +40,9 @@ class EpubParser : FileDocumentParser {
 
             val sb = StringBuilder()
             for (href in spineHrefs) {
-                val path = if (opfDir.isEmpty()) href else "$opfDir/$href"
-                val chapterBytes = entries[path] ?: continue
+                val cleanHref = href.substringBefore('#')
+                val path = if (opfDir.isEmpty()) cleanHref else "$opfDir/$cleanHref"
+                val chapterBytes = entries[path] ?: entries[decode(path)] ?: continue
                 val doc = Jsoup.parse(String(chapterBytes, Charsets.UTF_8))
                 doc.select("script, style").remove()
                 val chapterText = doc.body()?.text().orEmpty()
@@ -68,59 +74,37 @@ class EpubParser : FileDocumentParser {
         return result
     }
 
-    /**
-     * Hardened against XXE while still accepting real-world EPUBs. Many valid
-     * EPUBs (especially EPUB2) declare a `<!DOCTYPE>` in container.xml / the OPF,
-     * so we must NOT set `disallow-doctype-decl` - that rejects legitimate books
-     * with a "DOCTYPE is disallowed" error. The actual attack vector is external
-     * entity / external DTD *resolution*, which we disable instead; the DOCTYPE
-     * keyword itself is harmless. Features are set best-effort because Android's
-     * XML parser doesn't recognize every Apache feature name.
-     */
-    private fun safeDocumentBuilder() = DocumentBuilderFactory.newInstance().apply {
-        runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
-        runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
-        runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
-        isXIncludeAware = false
-        isExpandEntityReferences = false
-    }.newDocumentBuilder().apply {
-        // Belt-and-suspenders: resolve any external entity/DTD reference (e.g. an
-        // EPUB2 DOCTYPE pointing at the XHTML DTD URL) to empty rather than letting
-        // the parser fetch it - which both closes the XXE hole and avoids an offline
-        // "can't reach the DTD" failure, regardless of which features above applied.
-        setEntityResolver { _, _ -> InputSource(StringReader("")) }
-    }
-
-    private fun findOpfPath(containerXml: ByteArray): String {
-        val doc = safeDocumentBuilder().parse(ByteArrayInputStream(containerXml))
-        val rootfile = doc.getElementsByTagName("rootfile").item(0) as? Element
-            ?: throw IllegalStateException("Not a valid EPUB: missing <rootfile>")
-        return rootfile.getAttribute("full-path")
+    /** Path of the OPF package document, read from container.xml's <rootfile full-path="…">. */
+    private fun findOpfPath(containerXml: ByteArray): String? {
+        val doc = Jsoup.parse(String(containerXml, Charsets.UTF_8), "", Parser.xmlParser())
+        return doc.getElementsByTag("rootfile").firstOrNull()
+            ?.attr("full-path")
+            ?.takeIf { it.isNotBlank() }
     }
 
     /** Returns (book title, spine item hrefs in reading order). */
     private fun parseOpf(opfBytes: ByteArray): Pair<String, List<String>> {
-        val doc = safeDocumentBuilder().parse(ByteArrayInputStream(opfBytes))
+        val doc = Jsoup.parse(String(opfBytes, Charsets.UTF_8), "", Parser.xmlParser())
 
-        val title = doc.getElementsByTagName("dc:title").item(0)?.textContent
-            ?: doc.getElementsByTagName("title").item(0)?.textContent
-            ?: ""
+        val title = doc.getElementsByTag("dc:title").firstOrNull()?.text()?.takeIf { it.isNotBlank() }
+            ?: doc.getElementsByTag("title").firstOrNull()?.text().orEmpty()
 
-        val manifest = mutableMapOf<String, String>() // id -> href
-        val manifestNodes = doc.getElementsByTagName("item")
-        for (i in 0 until manifestNodes.length) {
-            val el = manifestNodes.item(i) as Element
-            manifest[el.getAttribute("id")] = el.getAttribute("href")
+        val manifest = HashMap<String, String>() // id -> href
+        for (item in doc.getElementsByTag("item")) {
+            val id = item.attr("id")
+            val href = item.attr("href")
+            if (id.isNotEmpty() && href.isNotEmpty()) manifest[id] = href
         }
 
         val spineHrefs = mutableListOf<String>()
-        val spineNodes = doc.getElementsByTagName("itemref")
-        for (i in 0 until spineNodes.length) {
-            val el = spineNodes.item(i) as Element
-            val idref = el.getAttribute("idref")
-            manifest[idref]?.let { spineHrefs.add(it) }
+        for (itemref in doc.getElementsByTag("itemref")) {
+            manifest[itemref.attr("idref")]?.let { spineHrefs.add(it) }
         }
 
         return title to spineHrefs
     }
+
+    /** EPUB hrefs may be percent-encoded (e.g. spaces as %20) while zip entry names are literal. */
+    private fun decode(path: String): String =
+        runCatching { URLDecoder.decode(path, "UTF-8") }.getOrDefault(path)
 }
