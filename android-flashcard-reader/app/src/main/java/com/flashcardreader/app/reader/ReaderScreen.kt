@@ -124,15 +124,17 @@ fun ReaderScreen(
             val page = state.pages.getOrNull(state.currentPageIndex)
             val pageText = if (page != null) state.fullText.substring(page.startChar, page.endChar) else ""
 
-            // A word can wrap to any position on the page (including right against the
-            // left/right edges), so paging by screen-position "zones" fought with tapping
-            // words. Instead we separate gestures by *type*, on two independent detectors:
-            //   - horizontal swipe  -> turn the page (right = back, left = forward)
-            //   - long-press a word -> highlight it and open its add/edit flashcard
-            //   - plain tap         -> clear any lingering highlight
-            // The word highlights the instant the finger lands (pressing) and stays
-            // highlighted after the dialog closes (selected) until the next tap, so the
-            // gesture always has visible feedback rather than a silent wait.
+            // Gestures follow Moon+ Reader's proven model, which is far more reliable
+            // than swipe-only paging (a single tap always registers; a swipe needs a
+            // sustained drag that quick flicks miss):
+            //   - tap the left third   -> previous page
+            //   - tap the right third  -> next page
+            //   - tap the center third -> clear any word highlight
+            //   - long-press a word    -> highlight it + open its add/edit flashcard
+            //   - horizontal swipe     -> also turns the page (secondary, flick-friendly)
+            // Tap zones no longer conflict with word selection because selection moved to
+            // long-press. The word highlights the instant the finger lands (pressing) and
+            // stays highlighted after the dialog closes (selected) until the next tap.
             var pressingRange by remember(pageText) { mutableStateOf<IntRange?>(null) }
             var selectedRange by remember(pageText) { mutableStateOf<IntRange?>(null) }
 
@@ -157,13 +159,14 @@ fun ReaderScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(24.dp)
-                    // Page-turn: a real horizontal swipe, not a screen region.
+                    // Secondary paging: a flick-friendly horizontal swipe. Threshold is a
+                    // small fraction of width so a quick flick counts, not only a long drag.
                     .pointerInput(state.currentPageIndex, state.pages.size) {
                         var totalDx = 0f
                         detectHorizontalDragGestures(
                             onDragStart = { totalDx = 0f },
                             onDragEnd = {
-                                val threshold = size.width * 0.12f
+                                val threshold = size.width * 0.07f
                                 if (totalDx <= -threshold) viewModel.goToNextPage()
                                 else if (totalDx >= threshold) viewModel.goToPreviousPage()
                             },
@@ -173,8 +176,9 @@ fun ReaderScreen(
                             change.consume()
                         }
                     }
-                    // Word selection: long-press highlights + opens the flashcard; a plain
-                    // tap clears the highlight. onPress gives touch-down feedback immediately.
+                    // Primary paging: single-tap zones (Moon Reader style). Long-press still
+                    // selects a word, so tap and long-press don't collide. onPress gives
+                    // immediate touch-down highlight feedback.
                     .pointerInput(state.currentPageIndex, pageText) {
                         detectTapGestures(
                             onPress = { offset ->
@@ -183,7 +187,13 @@ fun ReaderScreen(
                                 tryAwaitRelease()
                                 pressingRange = null
                             },
-                            onTap = { selectedRange = null },
+                            onTap = { offset ->
+                                when {
+                                    offset.x < size.width * 0.30f -> viewModel.goToPreviousPage()
+                                    offset.x > size.width * 0.70f -> viewModel.goToNextPage()
+                                    else -> selectedRange = null
+                                }
+                            },
                             onLongPress = { offset ->
                                 val layout = textLayout
                                 val range = layout?.let { wordRangeAt(pageText, it.getOffsetForPosition(offset)) }
