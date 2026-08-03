@@ -45,7 +45,7 @@ import com.flashcardreader.app.theme.colorsFor
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** What the add/edit-flashcard dialog is currently prefilled with, or null if closed. */
-private data class FlashcardPrefill(val term: String, val definition: String)
+private data class FlashcardPrefill(val term: String, val definition: String, val contextSentence: String = "")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -130,7 +130,8 @@ fun ReaderScreen(
                     onSelectWord = { word, range ->
                         selectedRange = range
                         val existing = state.terms.find { it.normalizedText == word.lowercase() }
-                        flashcardPrefill = FlashcardPrefill(word, existing?.definition.orEmpty())
+                        val sentence = ContextExtractor.sentenceAround(state.fullText, range.first, range.last + 1)
+                        flashcardPrefill = FlashcardPrefill(word, existing?.definition.orEmpty(), sentence)
                     },
                 )
             }
@@ -153,6 +154,7 @@ fun ReaderScreen(
         AddFlashcardDialog(
             prefilledText = prefill.term,
             prefilledDefinition = prefill.definition,
+            contextSentence = prefill.contextSentence,
             onDismiss = { flashcardPrefill = null },
             onSave = { term, definition ->
                 viewModel.createFlashcard(term, definition)
