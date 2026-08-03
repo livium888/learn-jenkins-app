@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.IntervalFormat
@@ -50,10 +51,15 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
     // (the hypercorrection effect) and train metacognitive calibration.
     var confidence by remember(term.id) { mutableStateOf(Confidence.UNSURE) }
 
-    // Alternate cue by review count so a given card isn't always the same question type.
-    // reps is the count BEFORE this review, so a NEW card (0) starts with definition recall.
-    val cloze = remember(term.id, contextSentence) {
-        if (term.reps % 2 == 1) clozeSentence(contextSentence, term.displayText) else null
+    // Adaptive difficulty (the spirit of the 85% rule): scale the cue to how well you know
+    // the word. While it's still being learned you get the easier recognition cue
+    // (definition recall); once it's established (in the REVIEW state with a couple of reps)
+    // you get the harder production cue (cloze - recall the exact word). Serving harder cues
+    // to strong cards and easier cues to weak ones pushes each card's success toward the
+    // middle instead of leaving it trivially easy or impossibly hard.
+    val useCloze = term.state == CardState.REVIEW && term.reps >= 2
+    val cloze = remember(term.id, contextSentence, useCloze) {
+        if (useCloze) clozeSentence(contextSentence, term.displayText) else null
     }
     val isCloze = cloze != null
 
