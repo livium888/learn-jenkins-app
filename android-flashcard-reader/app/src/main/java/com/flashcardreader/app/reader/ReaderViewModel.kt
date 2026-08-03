@@ -31,6 +31,8 @@ data class ReaderUiState(
     val initialChunkIndex: Int = 0,
     /** Due flashcards to answer before continuing. Shown as a blocking dialog. */
     val pendingFlashcards: List<TermMatch> = emptyList(),
+    /** True when it's time for a comprehension free-recall check (after a stretch of reading). */
+    val pendingComprehension: Boolean = false,
     val typography: ReaderTypography = ReaderTypography(),
     val loading: Boolean = true,
 )
@@ -50,6 +52,10 @@ class ReaderViewModel(
     private val scannedChunks = mutableSetOf<Int>()
     private var lastPersistedChunk = -1
 
+    /** Char offset of the last comprehension prompt, so we prompt again after a stretch of reading. */
+    private var lastRecallOffset = 0
+    private val recallThresholdChars = 12000
+
     init {
         viewModelScope.launch {
             val source = libraryRepository.getSource(sourceId)
@@ -60,6 +66,7 @@ class ReaderViewModel(
             val startIndex = source?.let { src ->
                 chunks.indexOfFirst { it.endChar > src.lastPositionChar }.let { if (it < 0) 0 else it }
             } ?: 0
+            lastRecallOffset = chunks.getOrNull(startIndex)?.startChar ?: 0
             _uiState.update {
                 it.copy(
                     source = source, fullText = text, terms = terms, chunks = chunks,
@@ -84,7 +91,7 @@ class ReaderViewModel(
             state.chunks.getOrNull(firstVisible)?.let { persistPosition(it.startChar) }
         }
 
-        if (state.pendingFlashcards.isNotEmpty()) return // one quiz at a time
+        if (state.pendingFlashcards.isNotEmpty() || state.pendingComprehension) return // one prompt at a time
 
         val now = System.currentTimeMillis()
         val due = mutableListOf<TermMatch>()
@@ -100,7 +107,20 @@ class ReaderViewModel(
             val seen = HashSet<Long>()
             val queue = due.filter { seen.add(it.term.id) }
             _uiState.update { it.copy(pendingFlashcards = queue) }
+            return
         }
+
+        // No flashcard due here - after a stretch of new reading, prompt a comprehension
+        // free-recall ("what was this about?"), the strongest study technique for prose.
+        val firstStart = state.chunks.getOrNull(firstVisible)?.startChar ?: 0
+        if (firstStart - lastRecallOffset >= recallThresholdChars) {
+            lastRecallOffset = firstStart
+            _uiState.update { it.copy(pendingComprehension = true) }
+        }
+    }
+
+    fun dismissComprehension() {
+        _uiState.update { it.copy(pendingComprehension = false) }
     }
 
     private fun logOccurrences(chunk: TextChunk, dueMatches: List<TermMatch>) {

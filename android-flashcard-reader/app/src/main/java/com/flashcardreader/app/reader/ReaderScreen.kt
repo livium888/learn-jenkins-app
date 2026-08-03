@@ -142,6 +142,10 @@ fun ReaderScreen(
         FlashcardDialog(term = match.term, contextSentence = match.contextSentence, onAnswered = viewModel::answerFlashcard)
     }
 
+    if (state.pendingComprehension && state.pendingFlashcards.isEmpty()) {
+        ComprehensionDialog(onDone = viewModel::dismissComprehension)
+    }
+
     if (showSettings) {
         ReaderSettingsSheet(
             typography = typography,
