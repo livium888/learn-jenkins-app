@@ -1,6 +1,7 @@
 package com.flashcardreader.app.theme
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -17,6 +18,8 @@ class ReaderPrefs(private val context: Context) {
         val FONT_SIZE = floatPreferencesKey("font_size")
         val LINE_HEIGHT = floatPreferencesKey("line_height")
         val PALETTE = stringPreferencesKey("palette")
+        val JUSTIFY = booleanPreferencesKey("justify")
+        val MARGIN = floatPreferencesKey("margin_scale")
     }
 
     val typography: Flow<ReaderTypography> = context.dataStore.data.map { prefs ->
@@ -25,6 +28,8 @@ class ReaderPrefs(private val context: Context) {
             fontSizeSp = prefs[Keys.FONT_SIZE] ?: 18f,
             lineHeightMultiplier = prefs[Keys.LINE_HEIGHT] ?: 1.5f,
             palette = prefs[Keys.PALETTE]?.let { runCatching { ReaderPalette.valueOf(it) }.getOrNull() } ?: ReaderPalette.LIGHT,
+            justify = prefs[Keys.JUSTIFY] ?: true,
+            marginScale = prefs[Keys.MARGIN] ?: 1f,
         )
     }
 
@@ -34,6 +39,8 @@ class ReaderPrefs(private val context: Context) {
             prefs[Keys.FONT_SIZE] = typography.fontSizeSp
             prefs[Keys.LINE_HEIGHT] = typography.lineHeightMultiplier
             prefs[Keys.PALETTE] = typography.palette.name
+            prefs[Keys.JUSTIFY] = typography.justify
+            prefs[Keys.MARGIN] = typography.marginScale
         }
     }
 }

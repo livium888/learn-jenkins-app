@@ -91,7 +91,7 @@ class MobiParser : FileDocumentParser {
         val html = textBytes.toByteArray().toString(charset)
         val plainText = Jsoup.parse(html).let { doc ->
             doc.select("script, style").remove()
-            doc.body()?.text().orEmpty()
+            blockText(doc) // preserve paragraph breaks, same as EPUB
         }
 
         val title = record0Title(bytes).ifBlank { displayName.substringBeforeLast('.') }

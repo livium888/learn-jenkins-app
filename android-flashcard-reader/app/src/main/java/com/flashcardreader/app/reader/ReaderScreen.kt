@@ -38,6 +38,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.theme.colorsFor
@@ -93,6 +94,7 @@ fun ReaderScreen(
             fontSize = typography.fontSize,
             lineHeight = typography.lineHeight,
             color = colors.text,
+            textAlign = if (typography.justify) TextAlign.Justify else TextAlign.Start,
         )
 
         val listState = rememberLazyListState(initialFirstVisibleItemIndex = state.initialChunkIndex)
@@ -114,7 +116,7 @@ fun ReaderScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .background(colors.background),
-            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 24.dp),
+            contentPadding = PaddingValues(horizontal = typography.horizontalMarginDp.dp, vertical = 24.dp),
         ) {
             itemsIndexed(state.chunks, key = { _, chunk -> chunk.startChar }) { _, chunk ->
                 ChunkText(

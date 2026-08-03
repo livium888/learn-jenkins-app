@@ -45,7 +45,7 @@ class EpubParser : FileDocumentParser {
                 val chapterBytes = entries[path] ?: entries[decode(path)] ?: continue
                 val doc = Jsoup.parse(String(chapterBytes, Charsets.UTF_8))
                 doc.select("script, style").remove()
-                val chapterText = doc.body()?.text().orEmpty()
+                val chapterText = blockText(doc)
                 if (chapterText.isNotBlank()) {
                     sb.append(chapterText).append("\n\n")
                 }
@@ -108,3 +108,26 @@ class EpubParser : FileDocumentParser {
     private fun decode(path: String): String =
         runCatching { URLDecoder.decode(path, "UTF-8") }.getOrDefault(path)
 }
+
+/**
+ * Extracts readable text while PRESERVING paragraph breaks: each block element becomes
+ * its own paragraph separated by a blank line, instead of Jsoup's flat body().text()
+ * that collapses a whole chapter into one wall of text. Falls back to flat text if the
+ * chapter has no recognizable block elements. Shared by the EPUB and MOBI parsers.
+ */
+internal fun blockText(doc: org.jsoup.nodes.Document): String {
+    val blocks = doc.body()?.select("p, h1, h2, h3, h4, h5, h6, li, blockquote")
+    if (blocks.isNullOrEmpty()) return doc.body()?.text().orEmpty()
+    val sb = StringBuilder()
+    for (block in blocks) {
+        // Skip a block whose text is already fully contained in an ancestor we'll emit
+        // (e.g. <blockquote><p>…</p></blockquote>) to avoid duplicating the same prose.
+        if (block.parents().any { it.tagName() in BLOCK_TAGS }) continue
+        val t = block.text().trim()
+        if (t.isNotEmpty()) sb.append(t).append("\n\n")
+    }
+    val result = sb.toString().trim()
+    return result.ifEmpty { doc.body()?.text().orEmpty() }
+}
+
+private val BLOCK_TAGS = setOf("p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote")

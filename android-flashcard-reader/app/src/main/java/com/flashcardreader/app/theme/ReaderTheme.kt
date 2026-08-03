@@ -27,7 +27,12 @@ data class ReaderTypography(
     val fontSizeSp: Float = 18f,
     val lineHeightMultiplier: Float = 1.5f,
     val palette: ReaderPalette = ReaderPalette.LIGHT,
+    /** Justify text to both margins (like a printed book) vs. ragged-right. */
+    val justify: Boolean = true,
+    /** Horizontal page margin as a multiple of the 24dp base (0.5 = tight, 2.0 = wide). */
+    val marginScale: Float = 1f,
 ) {
     val fontSize get() = fontSizeSp.sp
     val lineHeight get() = (fontSizeSp * lineHeightMultiplier).sp
+    val horizontalMarginDp get() = (24f * marginScale)
 }
