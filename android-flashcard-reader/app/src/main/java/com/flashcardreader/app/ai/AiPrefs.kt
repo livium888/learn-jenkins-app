@@ -11,8 +11,10 @@ import android.content.Context
 class AiPrefs(context: Context) {
     private val prefs = context.getSharedPreferences("ai_prefs", Context.MODE_PRIVATE)
 
+    // Defaults on: providing a key is itself the opt-in, so the tutor is ready as soon as a
+    // key exists. The toggle stays as an explicit off switch that keeps the key.
     var enabled: Boolean
-        get() = prefs.getBoolean(KEY_ENABLED, false)
+        get() = prefs.getBoolean(KEY_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_ENABLED, value).apply()
 
     var apiKey: String
