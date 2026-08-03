@@ -16,9 +16,12 @@ import com.flashcardreader.app.reader.ReaderScreen
 import com.flashcardreader.app.reader.ReaderViewModel
 import com.flashcardreader.app.reader.ReviewScreen
 import com.flashcardreader.app.reader.ReviewViewModel
+import com.flashcardreader.app.words.WordsScreen
+import com.flashcardreader.app.words.WordsViewModel
 
 private const val ROUTE_LIBRARY = "library"
 private const val ROUTE_REVIEW = "review"
+private const val ROUTE_WORDS = "words"
 private const val ROUTE_READER = "reader/{sourceId}"
 
 @Composable
@@ -34,6 +37,7 @@ fun AppNavGraph(app: FlashcardReaderApp) {
                 viewModel = viewModel,
                 onOpenSource = { id -> navController.navigate("reader/$id") },
                 onOpenReview = { navController.navigate(ROUTE_REVIEW) },
+                onOpenWords = { navController.navigate(ROUTE_WORDS) },
             )
         }
         composable(ROUTE_REVIEW) {
@@ -41,6 +45,12 @@ fun AppNavGraph(app: FlashcardReaderApp) {
                 factory = viewModelFactory { initializer { ReviewViewModel(app.termRepository, app.libraryRepository) } },
             )
             ReviewScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+        }
+        composable(ROUTE_WORDS) {
+            val viewModel: WordsViewModel = viewModel(
+                factory = viewModelFactory { initializer { WordsViewModel(app.termRepository) } },
+            )
+            WordsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
         composable(
             ROUTE_READER,

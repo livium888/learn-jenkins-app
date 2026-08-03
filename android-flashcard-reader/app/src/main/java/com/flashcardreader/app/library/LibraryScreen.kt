@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -45,6 +46,7 @@ fun LibraryScreen(
     viewModel: LibraryViewModel,
     onOpenSource: (Long) -> Unit,
     onOpenReview: () -> Unit,
+    onOpenWords: () -> Unit,
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -70,7 +72,8 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text("My Library") },
                 actions = {
-                    IconButton(onClick = onOpenReview) { Icon(Icons.Filled.List, contentDescription = "Review due cards") }
+                    IconButton(onClick = onOpenWords) { Icon(Icons.Filled.List, contentDescription = "My words") }
+                    IconButton(onClick = onOpenReview) { Icon(Icons.Filled.Refresh, contentDescription = "Review due cards") }
                 },
             )
         },

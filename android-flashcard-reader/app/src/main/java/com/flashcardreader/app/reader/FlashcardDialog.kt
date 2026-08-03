@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import com.flashcardreader.app.data.db.entities.Term
+import com.flashcardreader.app.data.fsrs.IntervalFormat
 import com.flashcardreader.app.data.fsrs.Rating
 
 /**
@@ -61,11 +62,21 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
             } else {
                 Column(horizontalAlignment = Alignment.End) {
                     Text("Did you know it?", modifier = Modifier.padding(bottom = 4.dp))
+                    // Each button shows when you'd next see this word if you pick it, so the
+                    // spaced-repetition consequence of each rating is visible before tapping.
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = { onAnswered(Rating.AGAIN) }, modifier = Modifier.fillMaxWidth()) { Text("Forgot it") }
-                        OutlinedButton(onClick = { onAnswered(Rating.HARD) }, modifier = Modifier.fillMaxWidth()) { Text("Hard") }
-                        OutlinedButton(onClick = { onAnswered(Rating.GOOD) }, modifier = Modifier.fillMaxWidth()) { Text("Good") }
-                        OutlinedButton(onClick = { onAnswered(Rating.EASY) }, modifier = Modifier.fillMaxWidth()) { Text("Easy") }
+                        Button(onClick = { onAnswered(Rating.AGAIN) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Forgot it  ·  ${IntervalFormat.nextLabel(term, Rating.AGAIN)}")
+                        }
+                        OutlinedButton(onClick = { onAnswered(Rating.HARD) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Hard  ·  ${IntervalFormat.nextLabel(term, Rating.HARD)}")
+                        }
+                        OutlinedButton(onClick = { onAnswered(Rating.GOOD) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Good  ·  ${IntervalFormat.nextLabel(term, Rating.GOOD)}")
+                        }
+                        OutlinedButton(onClick = { onAnswered(Rating.EASY) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Easy  ·  ${IntervalFormat.nextLabel(term, Rating.EASY)}")
+                        }
                     }
                 }
             }
