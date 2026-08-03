@@ -4,6 +4,9 @@
     <!-- For evening/morning review-reminder notifications (Android 13+ runtime prompt). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- For the optional, bring-your-own-key AI tutor (Gemini) - used only on explicit request. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:name=".FlashcardReaderApp"
         android:allowBackup="true"

@@ -10,6 +10,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.flashcardreader.app.FlashcardReaderApp
+import com.flashcardreader.app.ai.AiSettingsScreen
 import com.flashcardreader.app.library.LibraryScreen
 import com.flashcardreader.app.library.LibraryViewModel
 import com.flashcardreader.app.reader.ReaderScreen
@@ -25,6 +26,7 @@ private const val ROUTE_LIBRARY = "library"
 private const val ROUTE_REVIEW = "review"
 private const val ROUTE_WORDS = "words"
 private const val ROUTE_STATS = "stats"
+private const val ROUTE_AI = "ai-settings"
 private const val ROUTE_READER = "reader/{sourceId}"
 
 @Composable
@@ -60,7 +62,14 @@ fun AppNavGraph(app: FlashcardReaderApp) {
             val viewModel: StatsViewModel = viewModel(
                 factory = viewModelFactory { initializer { StatsViewModel(app.termRepository) } },
             )
-            StatsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            StatsScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() },
+                onOpenAiSettings = { navController.navigate(ROUTE_AI) },
+            )
+        }
+        composable(ROUTE_AI) {
+            AiSettingsScreen(onBack = { navController.popBackStack() })
         }
         composable(
             ROUTE_READER,

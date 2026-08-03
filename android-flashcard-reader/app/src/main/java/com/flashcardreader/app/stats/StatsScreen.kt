@@ -3,6 +3,7 @@ package com.flashcardreader.app.stats
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,7 +35,7 @@ import com.flashcardreader.app.reminders.ReminderScheduler
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
+fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit, onOpenAiSettings: () -> Unit) {
     val stats by viewModel.stats.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -76,6 +77,16 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
             ReminderToggle()
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+            Text(
+                "AI tutor settings ›",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenAiSettings)
+                    .padding(vertical = 8.dp),
+            )
 
             Text(
                 "Retention is a rough proxy (1 − lapses ÷ reviews). It sharpens as you review more.",
