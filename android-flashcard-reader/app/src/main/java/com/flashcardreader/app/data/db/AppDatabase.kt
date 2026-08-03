@@ -6,6 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.flashcardreader.app.data.db.dao.OccurrenceDao
 import com.flashcardreader.app.data.db.dao.SourceDao
 import com.flashcardreader.app.data.db.dao.TermDao
@@ -31,7 +33,7 @@ class Converters {
 
 @Database(
     entities = [Term::class, Source::class, Occurrence::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -43,13 +45,21 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile private var instance: AppDatabase? = null
 
+        /** v2 adds the curiosity flag and self-reference note columns to terms. */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE terms ADD COLUMN curious INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE terms ADD COLUMN selfNote TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "flashcard-reader.db",
-                ).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
             }
     }
 }

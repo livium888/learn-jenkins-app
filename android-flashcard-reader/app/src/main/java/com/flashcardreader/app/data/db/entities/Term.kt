@@ -32,6 +32,12 @@ data class Term(
     val reps: Int = 0,
     val lapses: Int = 0,
     val state: CardState = CardState.NEW,
+
+    // --- Encoding boosters (see data model migration v2) ---
+    /** Marked "curious": rides the curiosity/dopamine memory boost (Gruber & Ranganath). */
+    val curious: Boolean = false,
+    /** "Why does this matter to me?" - the self-reference effect, a strong encoding boost. */
+    val selfNote: String = "",
 )
 
 enum class CardState { NEW, LEARNING, REVIEW, RELEARNING }

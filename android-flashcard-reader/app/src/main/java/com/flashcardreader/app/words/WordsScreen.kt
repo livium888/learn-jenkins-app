@@ -30,7 +30,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.IntervalFormat
-import com.flashcardreader.app.reader.AddFlashcardDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,14 +63,11 @@ fun WordsScreen(viewModel: WordsViewModel, onBack: () -> Unit) {
     }
 
     editing?.let { term ->
-        // Reuses the add/edit dialog; on save we only update the definition, keeping the
-        // word (and therefore its matching + review history) intact.
-        AddFlashcardDialog(
-            prefilledText = term.displayText,
-            prefilledDefinition = term.definition,
+        EditWordDialog(
+            term = term,
             onDismiss = { editing = null },
-            onSave = { _, definition ->
-                viewModel.updateDefinition(term, definition)
+            onSave = { definition, selfNote, curious ->
+                viewModel.updateMeta(term, definition, selfNote, curious)
                 editing = null
             },
         )
@@ -90,10 +86,13 @@ private fun WordRow(term: Term, onEdit: () -> Unit, onDelete: () -> Unit) {
         }
     }
     ListItem(
-        headlineContent = { Text(term.displayText) },
+        headlineContent = { Text(if (term.curious) "★ ${term.displayText}" else term.displayText) },
         supportingContent = {
             Column {
                 Text(term.definition.ifBlank { "(no definition - tap to add one)" })
+                if (term.selfNote.isNotBlank()) {
+                    Text("“${term.selfNote}”", style = MaterialTheme.typography.bodySmall)
+                }
                 Text(stats, style = MaterialTheme.typography.labelSmall)
             }
         },

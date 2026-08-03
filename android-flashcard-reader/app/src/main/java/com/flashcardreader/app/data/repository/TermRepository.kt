@@ -38,6 +38,11 @@ class TermRepository(
         termDao.update(term.copy(definition = definition))
     }
 
+    /** Update the card's answer plus its encoding-booster metadata (self-note, curiosity). */
+    suspend fun updateMeta(term: Term, definition: String, selfNote: String, curious: Boolean) {
+        termDao.update(term.copy(definition = definition, selfNote = selfNote, curious = curious))
+    }
+
     suspend fun delete(term: Term) = termDao.delete(term.id)
 
     /** Records that a term was seen while reading, without necessarily quizzing on it. */

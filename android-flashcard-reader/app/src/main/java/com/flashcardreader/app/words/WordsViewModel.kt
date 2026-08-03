@@ -15,8 +15,8 @@ class WordsViewModel(private val termRepository: TermRepository) : ViewModel() {
     val terms: StateFlow<List<Term>> = termRepository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun updateDefinition(term: Term, definition: String) {
-        viewModelScope.launch { termRepository.updateDefinition(term, definition) }
+    fun updateMeta(term: Term, definition: String, selfNote: String, curious: Boolean) {
+        viewModelScope.launch { termRepository.updateMeta(term, definition, selfNote, curious) }
     }
 
     fun delete(term: Term) {
