@@ -176,10 +176,8 @@ fun ReaderScreen(
                             contentDescription = if (bookmarked) "Remove bookmark" else "Add bookmark",
                         )
                     }
-                    if (state.chapters.isNotEmpty() || state.bookmarks.isNotEmpty()) {
-                        IconButton(onClick = { showToc = true }) {
-                            Icon(Icons.Filled.Menu, contentDescription = "Contents and bookmarks")
-                        }
+                    IconButton(onClick = { showToc = true }) {
+                        Icon(Icons.Filled.Menu, contentDescription = "Contents and bookmarks")
                     }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Reading settings")
@@ -241,8 +239,16 @@ fun ReaderScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = typography.horizontalMarginDp.dp, vertical = 24.dp),
             ) {
-                itemsIndexed(state.chunks, key = { _, chunk -> chunk.startChar }) { _, chunk ->
-                    chunk.chapterTitle?.let { ChapterDivider(it, colors) }
+                itemsIndexed(state.chunks, key = { _, chunk -> chunk.startChar }) { index, chunk ->
+                    val chapter = chunk.chapterTitle
+                    if (chapter != null) {
+                        ChapterDivider(chapter, colors)
+                    } else if (index > 0) {
+                        // Draw a numbered page-break line wherever the text crosses a page boundary.
+                        val prevPage = state.chunks[index - 1].startChar / PAGE_CHARS
+                        val thisPage = chunk.startChar / PAGE_CHARS
+                        if (thisPage > prevPage) PageBreak(thisPage + 1, colors)
+                    }
                     ChunkText(
                         chunk = chunk,
                         style = style,
@@ -320,6 +326,25 @@ fun ReaderScreen(
                 flashcardPrefill = null
             },
         )
+    }
+}
+
+/** A visual page break: a thin rule across the column with the page number centered on it. */
+@Composable
+private fun PageBreak(pageNumber: Int, colors: ReaderColors) {
+    val line = colors.text.copy(alpha = 0.18f)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f).height(1.dp).background(line))
+        Text(
+            pageNumber.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.text.copy(alpha = 0.5f),
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        Box(Modifier.weight(1f).height(1.dp).background(line))
     }
 }
 
@@ -423,6 +448,16 @@ private fun ContentsDialog(
     onDismiss: () -> Unit,
 ) {
     AppDialog(onDismiss = onDismiss) {
+        if (chapters.isEmpty() && bookmarks.isEmpty()) {
+            Text("Contents", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "This book didn't include a chapter list, and you haven't bookmarked anything yet. " +
+                    "Tap the bookmark icon while reading to save a spot here.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         if (bookmarks.isNotEmpty()) {
             Text("Bookmarks", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             bookmarks.forEach { b ->
