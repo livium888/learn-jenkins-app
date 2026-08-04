@@ -2,25 +2,17 @@ package com.flashcardreader.app.reader
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,12 +21,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.sp
 import com.flashcardreader.app.ai.AiPrefs
 import com.flashcardreader.app.ai.GeminiTutor
 import com.flashcardreader.app.data.db.entities.CardState
@@ -42,15 +34,17 @@ import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.IntervalFormat
 import com.flashcardreader.app.data.fsrs.Rating
+import com.flashcardreader.app.ui.AppDialog
+import com.flashcardreader.app.ui.PrimaryButton
+import com.flashcardreader.app.ui.Spacing
+import com.flashcardreader.app.ui.TonalButton
 import kotlinx.coroutines.launch
 
 /**
- * The reading interruption / review card. Self-graded (Again/Hard/Good/Easy), feeding the
- * term's FSRS schedule.
- *
- * Housed in a roomy, non-dismissible sheet (a wide Surface in a Dialog) rather than a
- * cramped AlertDialog, so the prompt, your answer, the confidence chips, the AI feedback,
- * and the rating buttons all get breathing room in a single scrollable column.
+ * The reading-interruption / review card - the emotional centre of the app, so it gets the
+ * most care: a calm eyebrow label, a large prompt, the book sentence set as a soft quote,
+ * a segmented confidence control that never squashes, and a colour-coded 2x2 rating grid
+ * whose four choices each show when you'd next see the word.
  *
  * Retrieval cue alternates for interleaving / varied practice:
  *  - Definition recall: "what does X mean?" using the book sentence as context.
@@ -76,140 +70,216 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
     }
     val isCloze = cloze != null
 
-    Dialog(
-        onDismissRequest = { /* must answer to continue */ },
-        properties = DialogProperties(
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false,
-            usePlatformDefaultWidth = false,
-        ),
-    ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            tonalElevation = 4.dp,
-            modifier = Modifier.fillMaxWidth(0.94f).heightIn(max = 640.dp),
-        ) {
-            Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
+    AppDialog(onDismiss = { /* must answer to continue */ }, dismissible = false) {
+        Eyebrow(if (isCloze) "Fill the blank" else "Recall")
+        Text(
+            text = if (isCloze) "What word is missing?" else "What does “${term.displayText}” mean?",
+            style = MaterialTheme.typography.titleLarge,
+        )
+
+        // --- The book sentence, set as a soft quote. ---
+        val sentence = if (isCloze) cloze else contextSentence.takeIf { it.isNotBlank() }
+        if (sentence != null) {
+            QuoteCard(sentence)
+        }
+
+        if (!revealed) {
+            Text(
+                if (isCloze) "Say the missing word, then reveal." else "Try to recall it before revealing.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = typed,
+                onValueChange = { typed = it },
+                label = { Text("Your answer (optional)") },
+                singleLine = isCloze,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Text("How sure are you?", style = MaterialTheme.typography.labelLarge)
+            ConfidenceSegmented(selected = confidence, onSelect = { confidence = it })
+
+            PrimaryButton(text = "Reveal answer", onClick = { revealed = true })
+        } else {
+            // --- Revealed answer ---
+            if (typed.isNotBlank()) {
                 Text(
-                    text = if (isCloze) "Fill in the blank" else "What does “${term.displayText}” mean?",
-                    style = MaterialTheme.typography.titleLarge,
+                    "You wrote: $typed",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (isCloze) {
+                Text(
+                    term.displayText,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                if (term.definition.isNotBlank()) Text(term.definition, style = MaterialTheme.typography.bodyLarge)
+            } else {
+                Text(
+                    term.definition.ifBlank { "(no definition saved yet)" },
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
 
-                // --- Prompt + your answer / the revealed answer ---
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val sentence = if (isCloze) cloze else contextSentence.takeIf { it.isNotBlank() }
-                    if (sentence != null) {
-                        Text(
-                            text = "“$sentence”",
-                            style = MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic),
-                        )
+            if (confidence == Confidence.CONFIDENT) {
+                Text(
+                    "You felt sure — if you were off, this correction will stick harder.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // --- Optional AI tutor ---
+            if (aiReady) {
+                AiTutorBlock(
+                    result = aiResult,
+                    loading = aiLoading,
+                    onCheck = {
+                        aiLoading = true
+                        scope.launch {
+                            val r = GeminiTutor.evaluateGuess(context, term.displayText, contextSentence, typed)
+                            aiResult = r.getOrElse { "Couldn't reach the AI: ${it.message}" }
+                            aiLoading = false
+                        }
+                    },
+                )
+            }
+
+            Text("How well did you know it?", style = MaterialTheme.typography.labelLarge)
+            // Colour-coded 2x2 grid; each cell shows the next interval so the spaced-repetition
+            // consequence is visible before you tap. "Good" is the emphasised, recommended choice.
+            val scheme = MaterialTheme.colorScheme
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.tight)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.tight)) {
+                    RatingCell("Forgot", IntervalFormat.nextLabel(term, Rating.AGAIN), scheme.errorContainer, scheme.onErrorContainer) {
+                        onAnswered(Rating.AGAIN, confidence)
                     }
-                    if (!revealed) {
-                        Text(
-                            if (isCloze) "Recall the missing word." else "Recall what it means before revealing.",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        OutlinedTextField(
-                            value = typed,
-                            onValueChange = { typed = it },
-                            label = { Text("Your answer (optional)") },
-                            singleLine = isCloze,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    } else {
-                        if (typed.isNotBlank()) {
-                            Text("You wrote: $typed", style = MaterialTheme.typography.bodySmall)
-                        }
-                        HorizontalDivider()
-                        if (isCloze) {
-                            Text(term.displayText, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            if (term.definition.isNotBlank()) Text(term.definition)
-                        } else {
-                            Text(term.definition.ifBlank { "(no definition saved)" })
-                        }
+                    RatingCell("Hard", IntervalFormat.nextLabel(term, Rating.HARD), scheme.surfaceVariant, scheme.onSurfaceVariant) {
+                        onAnswered(Rating.HARD, confidence)
                     }
                 }
-
-                // --- Confidence (pre-reveal) / hypercorrection note (post-reveal) ---
-                if (!revealed) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("How sure are you?", style = MaterialTheme.typography.labelLarge)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Confidence.values().forEach { level ->
-                                FilterChip(
-                                    selected = confidence == level,
-                                    onClick = { confidence = level },
-                                    label = { Text(level.name.lowercase().replaceFirstChar(Char::uppercase)) },
-                                )
-                            }
-                        }
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.tight)) {
+                    RatingCell("Good", IntervalFormat.nextLabel(term, Rating.GOOD), scheme.primary, scheme.onPrimary) {
+                        onAnswered(Rating.GOOD, confidence)
                     }
-                } else if (confidence == Confidence.CONFIDENT) {
-                    AssistChip(
-                        onClick = {},
-                        label = { Text("You felt sure — if you were wrong, this one will stick") },
-                    )
-                }
-
-                // --- Optional AI tutor: evaluate the guess ---
-                if (revealed && aiReady) {
-                    if (aiResult == null && !aiLoading) {
-                        OutlinedButton(
-                            onClick = {
-                                aiLoading = true
-                                scope.launch {
-                                    val result = GeminiTutor.evaluateGuess(context, term.displayText, contextSentence, typed)
-                                    aiResult = result.getOrElse { "Couldn't reach the AI: ${it.message}" }
-                                    aiLoading = false
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Check my guess with AI") }
+                    RatingCell("Easy", IntervalFormat.nextLabel(term, Rating.EASY), scheme.tertiaryContainer, scheme.onTertiaryContainer) {
+                        onAnswered(Rating.EASY, confidence)
                     }
-                    if (aiLoading) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CircularProgressIndicator(modifier = Modifier.padding(2.dp))
-                            Text("Asking the tutor…")
-                        }
-                    }
-                    aiResult?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                }
-
-                // --- Actions ---
-                if (!revealed) {
-                    Button(
-                        onClick = { revealed = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(vertical = 12.dp),
-                    ) { Text("Reveal") }
-                } else {
-                    Text("How well did you know it?", style = MaterialTheme.typography.labelLarge)
-                    // Each rating shows when you'd next see the word, so the spaced-repetition
-                    // consequence of the choice is visible before you tap.
-                    RatingButton("Forgot it", IntervalFormat.nextLabel(term, Rating.AGAIN), filled = true) { onAnswered(Rating.AGAIN, confidence) }
-                    RatingButton("Hard", IntervalFormat.nextLabel(term, Rating.HARD)) { onAnswered(Rating.HARD, confidence) }
-                    RatingButton("Good", IntervalFormat.nextLabel(term, Rating.GOOD)) { onAnswered(Rating.GOOD, confidence) }
-                    RatingButton("Easy", IntervalFormat.nextLabel(term, Rating.EASY)) { onAnswered(Rating.EASY, confidence) }
                 }
             }
         }
     }
 }
 
+/** Small uppercase label above the prompt. */
 @Composable
-private fun RatingButton(label: String, interval: String, filled: Boolean = false, onClick: () -> Unit) {
-    val content: @Composable () -> Unit = { Text("$label   ·   $interval") }
-    val modifier = Modifier.fillMaxWidth()
-    val padding = PaddingValues(vertical = 12.dp)
-    if (filled) {
-        Button(onClick = onClick, modifier = modifier, contentPadding = padding) { content() }
-    } else {
-        OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = padding) { content() }
+private fun Eyebrow(text: String) {
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+/** The book sentence rendered as a calm, indented quote. */
+@Composable
+private fun QuoteCard(sentence: String) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = "“$sentence”",
+            style = MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+        )
+    }
+}
+
+/** One cell of the 2x2 self-grade grid: a bold rating word over its next-review interval. */
+@Composable
+private fun RowScope.RatingCell(
+    label: String,
+    interval: String,
+    container: Color,
+    onContainer: Color,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.large,
+        color = container,
+        contentColor = onContainer,
+        modifier = Modifier.weight(1f).heightIn(min = 70.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 14.dp, horizontal = 10.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(label, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+            Text(interval, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+/** A full-width segmented control for the three confidence levels - equal widths, no squash. */
+@Composable
+private fun ConfidenceSegmented(selected: Confidence, onSelect: (Confidence) -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(modifier = Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Confidence.values().forEach { level ->
+                val active = level == selected
+                Surface(
+                    onClick = { onSelect(level) },
+                    shape = MaterialTheme.shapes.medium,
+                    color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = level.name.lowercase().replaceFirstChar(Char::uppercase),
+                        style = MaterialTheme.typography.labelLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The "check my guess with AI" affordance and its result / loading state. */
+@Composable
+private fun AiTutorBlock(result: String?, loading: Boolean, onCheck: () -> Unit) {
+    when {
+        result != null -> Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(result, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp))
+        }
+        loading -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.tight),
+        ) {
+            CircularProgressIndicator(modifier = Modifier.padding(2.dp))
+            Text("Asking the tutor…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        else -> TonalButton(text = "Check my guess with AI", onClick = onCheck)
     }
 }
 
