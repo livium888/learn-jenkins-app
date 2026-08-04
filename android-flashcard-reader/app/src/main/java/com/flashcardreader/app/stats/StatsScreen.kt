@@ -110,7 +110,7 @@ private fun AiSettingsRow(onClick: () -> Unit) {
         ) {
             Text("AI tutor settings", style = MaterialTheme.typography.bodyLarge)
             Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                Icons.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
