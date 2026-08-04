@@ -30,15 +30,15 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build release APK
+        run: ./gradlew assembleRelease --stacktrace
 
       # Kept for anyone browsing the Actions run on desktop.
-      - name: Upload debug APK artifact
+      - name: Upload release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: flashcard-reader-debug-apk
-          path: android-flashcard-reader/app/build/outputs/apk/debug/app-debug.apk
+          name: flashcard-reader-release-apk
+          path: android-flashcard-reader/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
       # The reliable way to get the APK onto a phone: a Release asset is a raw,
@@ -49,12 +49,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: debug-latest
-          name: Flashcard Reader - latest debug build
+          name: Flashcard Reader - latest build
           body: >-
-            Direct APK download for sideloading. On a phone, tap the app-debug.apk
-            asset below to install. Google Play Protect will warn about an
-            unrecognized developer (normal for a self-signed debug app) - choose
-            "More details" then "Install anyway".
+            Direct APK download for sideloading. This is now an optimized, non-debuggable
+            release build (R8 + Baseline Profile), signed with the same key as before so it
+            installs in place over an existing copy. On a phone, tap the app-release.apk
+            asset below to install. Google Play Protect will warn about an unrecognized
+            developer (normal for a self-signed app) - choose "More details" then
+            "Install anyway".
           prerelease: false
           make_latest: true
-          files: android-flashcard-reader/app/build/outputs/apk/debug/app-debug.apk
+          files: android-flashcard-reader/app/build/outputs/apk/release/app-release.apk

@@ -58,10 +58,21 @@ android {
             signingConfig = signingConfigs.getByName("stable")
         }
         getByName("release") {
-            // Real Play Store signing when a keystore is supplied; otherwise left unsigned
-            // (the debug build is the one used for sideloading, so this never blocks CI).
-            isMinifyEnabled = false
-            signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release") else null
+            // Non-debuggable + R8 (shrink/optimize) - this is the build that actually benefits
+            // from ART optimization and the Baseline Profile. Signed with the real key when one
+            // is supplied, else with the stable debug key so the sideloaded release APK still
+            // installs and updates in place over the existing app (same signature).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("stable")
+            }
         }
     }
 
@@ -115,6 +126,9 @@ dependencies {
 
     // Encrypts the AI-tutor API key at rest (AES-256, key wrapped by the Android Keystore).
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Installs the bundled Baseline Profile so ART AOT-compiles hot paths (startup/scroll).
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
 
     // Scheduled evening/morning review reminder notifications.
     implementation("androidx.work:work-runtime-ktx:2.9.1")
