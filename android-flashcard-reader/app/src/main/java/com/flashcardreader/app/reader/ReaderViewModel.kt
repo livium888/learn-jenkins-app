@@ -8,6 +8,7 @@ import com.flashcardreader.app.data.parser.Chapter
 import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Fsrs
 import com.flashcardreader.app.data.fsrs.Rating
+import com.flashcardreader.app.data.repository.Bookmark
 import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.repository.TermRepository
 import com.flashcardreader.app.theme.ReaderPrefs
@@ -26,6 +27,9 @@ data class TextChunk(val startChar: Int, val text: String, val chapterTitle: Str
     val endChar: Int get() = startChar + text.length
 }
 
+/** One in-book search hit: the match's char offset and a snippet of the text around it. */
+data class SearchHit(val offset: Int, val snippet: String)
+
 data class ReaderUiState(
     val source: Source? = null,
     val fullText: String = "",
@@ -33,6 +37,11 @@ data class ReaderUiState(
     val chunks: List<TextChunk> = emptyList(),
     /** Table of contents (title + char offset), empty if the book had none. */
     val chapters: List<Chapter> = emptyList(),
+    /** User bookmarks for this book, newest first. */
+    val bookmarks: List<Bookmark> = emptyList(),
+    /** Current in-book search query and its hits (offset + surrounding snippet). */
+    val searchQuery: String = "",
+    val searchResults: List<SearchHit> = emptyList(),
     /** Char offset the reader is currently at (top of the viewport), for the progress bar. */
     val currentCharOffset: Int = 0,
     /** Which chunk to scroll to on open, to resume where the reader left off. */
@@ -71,6 +80,7 @@ class ReaderViewModel(
             val terms = termRepository.allTerms()
             val typography = readerPrefs.typography.first()
             val chapters = source?.let { libraryRepository.readChapters(it) } ?: emptyList()
+            val bookmarks = source?.let { libraryRepository.readBookmarks(it) } ?: emptyList()
             val chunks = chunkText(text, chapters)
             val startIndex = source?.let { src ->
                 chunks.indexOfFirst { it.endChar > src.lastPositionChar }.let { if (it < 0) 0 else it }
@@ -80,7 +90,7 @@ class ReaderViewModel(
             _uiState.update {
                 it.copy(
                     source = source, fullText = text, terms = terms, chunks = chunks,
-                    chapters = chapters, currentCharOffset = startOffset,
+                    chapters = chapters, bookmarks = bookmarks, currentCharOffset = startOffset,
                     initialChunkIndex = startIndex, typography = typography, loading = false,
                 )
             }
@@ -135,6 +145,68 @@ class ReaderViewModel(
 
     fun dismissComprehension() {
         _uiState.update { it.copy(pendingComprehension = false) }
+    }
+
+    /**
+     * Bookmarks the current reading position, or removes an existing bookmark near it (so the
+     * same top-bar action both adds and clears). The label is a short preview of the text there.
+     */
+    fun toggleBookmarkAtCurrent() {
+        val source = _uiState.value.source ?: return
+        val offset = _uiState.value.currentCharOffset
+        val existing = _uiState.value.bookmarks.firstOrNull { kotlin.math.abs(it.offset - offset) < 200 }
+        val newList = if (existing != null) {
+            _uiState.value.bookmarks - existing
+        } else {
+            (_uiState.value.bookmarks + Bookmark(offset, snippetAt(offset), System.currentTimeMillis()))
+                .sortedByDescending { it.createdAt }
+        }
+        _uiState.update { it.copy(bookmarks = newList) }
+        viewModelScope.launch { libraryRepository.saveBookmarks(source, newList) }
+    }
+
+    fun removeBookmark(bookmark: Bookmark) {
+        val source = _uiState.value.source ?: return
+        val newList = _uiState.value.bookmarks - bookmark
+        _uiState.update { it.copy(bookmarks = newList) }
+        viewModelScope.launch { libraryRepository.saveBookmarks(source, newList) }
+    }
+
+    /** True when there's a bookmark within a screen's-worth of the current position. */
+    fun isBookmarkedNear(offset: Int): Boolean =
+        _uiState.value.bookmarks.any { kotlin.math.abs(it.offset - offset) < 200 }
+
+    /**
+     * Finds every occurrence of [query] in the book (case-insensitive), capped so a very common
+     * word can't build a huge list, each with a snippet of surrounding text for the results list.
+     */
+    fun search(query: String) {
+        val text = _uiState.value.fullText
+        if (query.isBlank()) {
+            _uiState.update { it.copy(searchQuery = "", searchResults = emptyList()) }
+            return
+        }
+        val hits = ArrayList<SearchHit>()
+        var idx = text.indexOf(query, 0, ignoreCase = true)
+        while (idx >= 0 && hits.size < 300) {
+            val start = (idx - 30).coerceAtLeast(0)
+            val end = (idx + query.length + 30).coerceAtMost(text.length)
+            val snippet = text.substring(start, end).replace(Regex("\\s+"), " ").trim()
+            hits.add(SearchHit(idx, snippet))
+            idx = text.indexOf(query, idx + query.length, ignoreCase = true)
+        }
+        _uiState.update { it.copy(searchQuery = query, searchResults = hits) }
+    }
+
+    fun clearSearch() {
+        _uiState.update { it.copy(searchQuery = "", searchResults = emptyList()) }
+    }
+
+    private fun snippetAt(offset: Int): String {
+        val text = _uiState.value.fullText
+        if (offset < 0 || offset >= text.length) return "Bookmark"
+        val end = (offset + 60).coerceAtMost(text.length)
+        return text.substring(offset, end).replace(Regex("\\s+"), " ").trim().ifEmpty { "Bookmark" }
     }
 
     private fun logOccurrences(chunk: TextChunk, dueMatches: List<TermMatch>) {

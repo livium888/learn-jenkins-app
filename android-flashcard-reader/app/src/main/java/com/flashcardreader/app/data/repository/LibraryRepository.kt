@@ -18,6 +18,9 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
+/** A reader bookmark: a char offset into the book plus a short preview label. */
+data class Bookmark(val offset: Int, val label: String, val createdAt: Long)
+
 /**
  * Owns the imported reading library (PDF / EPUB / MOBI only). Every book's
  * parsed plain text is cached once to app-private storage so the original
@@ -57,10 +60,37 @@ class LibraryRepository(
         }.getOrDefault(emptyList())
     }
 
+    /** Bookmarks for a book, newest first, read from its sidecar file. */
+    suspend fun readBookmarks(source: Source): List<Bookmark> = withContext(Dispatchers.IO) {
+        val file = bookmarksFile(source)
+        if (!file.exists()) return@withContext emptyList()
+        runCatching {
+            val arr = JSONArray(file.readText())
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Bookmark(o.getInt("offset"), o.getString("label"), o.optLong("createdAt", 0L))
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun saveBookmarks(source: Source, bookmarks: List<Bookmark>) = withContext(Dispatchers.IO) {
+        val file = bookmarksFile(source)
+        if (bookmarks.isEmpty()) {
+            file.delete()
+            return@withContext
+        }
+        val arr = JSONArray()
+        for (b in bookmarks) {
+            arr.put(JSONObject().put("offset", b.offset).put("label", b.label).put("createdAt", b.createdAt))
+        }
+        file.writeText(arr.toString())
+    }
+
     suspend fun delete(source: Source) {
         File(source.textFilePath).delete()
         pageCacheFile(source).delete()
         tocFile(source).delete()
+        bookmarksFile(source).delete()
         sourceDao.delete(source.id)
     }
 
@@ -69,6 +99,9 @@ class LibraryRepository(
 
     private fun tocFile(source: Source): File =
         File("${source.textFilePath.removeSuffix(".txt")}.toc.json")
+
+    private fun bookmarksFile(source: Source): File =
+        File("${source.textFilePath.removeSuffix(".txt")}.bookmarks.json")
 
     /**
      * Re-paginating a whole book (walking every character, measuring line

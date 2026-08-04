@@ -21,13 +21,18 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -56,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.data.parser.Chapter
 import com.flashcardreader.app.ui.AppDialog
+import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.theme.ReaderColors
 import com.flashcardreader.app.theme.colorsFor
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -84,6 +90,7 @@ fun ReaderScreen(
 
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
+    var showSearch by remember { mutableStateOf(false) }
     var flashcardPrefill by remember { mutableStateOf<FlashcardPrefill?>(null) }
     // Absolute char ranges (into the full book text) of the word being pressed / selected.
     var pressingRange by remember { mutableStateOf<IntRange?>(null) }
@@ -111,9 +118,19 @@ fun ReaderScreen(
                     }
                 },
                 actions = {
-                    if (state.chapters.isNotEmpty()) {
+                    IconButton(onClick = { showSearch = true }) {
+                        Icon(Icons.Filled.Search, contentDescription = "Search in book")
+                    }
+                    val bookmarked = viewModel.isBookmarkedNear(state.currentCharOffset)
+                    IconButton(onClick = { viewModel.toggleBookmarkAtCurrent() }) {
+                        Icon(
+                            if (bookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                            contentDescription = if (bookmarked) "Remove bookmark" else "Add bookmark",
+                        )
+                    }
+                    if (state.chapters.isNotEmpty() || state.bookmarks.isNotEmpty()) {
                         IconButton(onClick = { showToc = true }) {
-                            Icon(Icons.Filled.Menu, contentDescription = "Contents")
+                            Icon(Icons.Filled.Menu, contentDescription = "Contents and bookmarks")
                         }
                     }
                     IconButton(onClick = { showSettings = true }) {
@@ -211,11 +228,23 @@ fun ReaderScreen(
         )
     }
 
+    if (showSearch) {
+        SearchDialog(
+            initialQuery = state.searchQuery,
+            results = state.searchResults,
+            onSearch = viewModel::search,
+            onJump = { offset -> showSearch = false; jumpToOffset(offset) },
+            onDismiss = { showSearch = false },
+        )
+    }
+
     if (showToc) {
-        TocDialog(
+        ContentsDialog(
             chapters = state.chapters,
+            bookmarks = state.bookmarks,
             currentOffset = state.currentCharOffset,
             onJump = { offset -> showToc = false; jumpToOffset(offset) },
+            onRemoveBookmark = viewModel::removeBookmark,
             onDismiss = { showToc = false },
         )
     }
@@ -295,36 +324,115 @@ private fun ReaderProgressBar(
     }
 }
 
-/** The table of contents: tap a chapter to jump; the current chapter is highlighted. */
+/**
+ * Contents + bookmarks: tap a bookmark or chapter to jump; the current chapter is highlighted,
+ * and bookmarks can be removed inline.
+ */
 @Composable
-private fun TocDialog(
+private fun ContentsDialog(
     chapters: List<Chapter>,
+    bookmarks: List<com.flashcardreader.app.data.repository.Bookmark>,
     currentOffset: Int,
     onJump: (Int) -> Unit,
+    onRemoveBookmark: (com.flashcardreader.app.data.repository.Bookmark) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AppDialog(onDismiss = onDismiss) {
-        Text("Contents", style = MaterialTheme.typography.titleLarge)
-        val currentIdx = chapters.indexOfLast { it.charOffset <= currentOffset }
-        chapters.forEachIndexed { i, c ->
-            val active = i == currentIdx
-            Surface(
-                onClick = { onJump(c.charOffset) },
-                shape = MaterialTheme.shapes.medium,
-                color = if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    c.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(
-                        start = (12 + c.level.coerceIn(0, 3) * 14).dp,
-                        end = 12.dp,
-                        top = 12.dp,
-                        bottom = 12.dp,
-                    ),
-                )
+        if (bookmarks.isNotEmpty()) {
+            Text("Bookmarks", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            bookmarks.forEach { b ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        onClick = { onJump(b.offset) },
+                        shape = MaterialTheme.shapes.medium,
+                        color = Color.Transparent,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            "“${b.label}…”",
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                        )
+                    }
+                    IconButton(onClick = { onRemoveBookmark(b) }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Remove bookmark", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        if (chapters.isNotEmpty()) {
+            Text("Contents", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            val currentIdx = chapters.indexOfLast { it.charOffset <= currentOffset }
+            chapters.forEachIndexed { i, c ->
+                val active = i == currentIdx
+                Surface(
+                    onClick = { onJump(c.charOffset) },
+                    shape = MaterialTheme.shapes.medium,
+                    color = if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        c.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(
+                            start = (12 + c.level.coerceIn(0, 3) * 14).dp,
+                            end = 12.dp,
+                            top = 12.dp,
+                            bottom = 12.dp,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Search-in-book: type a query, run it, then tap any result snippet to jump there. */
+@Composable
+private fun SearchDialog(
+    initialQuery: String,
+    results: List<SearchHit>,
+    onSearch: (String) -> Unit,
+    onJump: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf(initialQuery) }
+    AppDialog(onDismiss = onDismiss) {
+        Text("Search in book", style = MaterialTheme.typography.titleLarge)
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("Find a word or phrase") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        PrimaryButton(text = "Search", enabled = query.isNotBlank(), onClick = { onSearch(query.trim()) })
+        if (results.isNotEmpty()) {
+            Text(
+                "${results.size}${if (results.size >= 300) "+" else ""} matches",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            results.forEach { hit ->
+                Surface(
+                    onClick = { onJump(hit.offset) },
+                    shape = MaterialTheme.shapes.medium,
+                    color = Color.Transparent,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        "…${hit.snippet}…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                    )
+                }
             }
         }
     }
