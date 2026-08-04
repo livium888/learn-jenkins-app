@@ -63,6 +63,23 @@ class TermRepository(
         )
     }
 
+    /** Records all of a page's occurrences in one transaction (cheaper than one insert each). */
+    suspend fun logOccurrences(entries: List<OccurrenceLog>) {
+        if (entries.isEmpty()) return
+        val now = System.currentTimeMillis()
+        occurrenceDao.insertAll(
+            entries.map {
+                Occurrence(
+                    termId = it.termId,
+                    sourceId = it.sourceId,
+                    charOffset = it.charOffset,
+                    seenAt = now,
+                    triggeredReview = it.triggeredReview,
+                )
+            },
+        )
+    }
+
     /**
      * Applies the user's flashcard answer, advancing the FSRS schedule, and records the
      * hypercorrection flag: being confident but wrong sets it; getting it right (Good/Easy)
@@ -151,3 +168,11 @@ class TermRepository(
      */
     suspend fun randomOccurrence(termId: Long): Occurrence? = occurrenceDao.forTerm(termId).randomOrNull()
 }
+
+/** One pending occurrence-log row, batched by [TermRepository.logOccurrences]. */
+data class OccurrenceLog(
+    val termId: Long,
+    val sourceId: Long,
+    val charOffset: Int,
+    val triggeredReview: Boolean,
+)

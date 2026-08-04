@@ -10,6 +10,7 @@ import com.flashcardreader.app.data.fsrs.Fsrs
 import com.flashcardreader.app.data.fsrs.Rating
 import com.flashcardreader.app.data.repository.Bookmark
 import com.flashcardreader.app.data.repository.LibraryRepository
+import com.flashcardreader.app.data.repository.OccurrenceLog
 import com.flashcardreader.app.data.repository.TermRepository
 import com.flashcardreader.app.theme.ReaderPrefs
 import com.flashcardreader.app.theme.ReaderTypography
@@ -83,7 +84,9 @@ class ReaderViewModel(
             val typography = readerPrefs.typography.first()
             val chapters = source?.let { libraryRepository.readChapters(it) } ?: emptyList()
             val bookmarks = source?.let { libraryRepository.readBookmarks(it) } ?: emptyList()
-            val chunks = chunkText(text, chapters)
+            // Chunking walks the whole book string; keep it off the main thread so a large
+            // book doesn't hitch on open.
+            val chunks = withContext(Dispatchers.Default) { chunkText(text, chapters) }
             val startIndex = source?.let { src ->
                 chunks.indexOfFirst { it.endChar > src.lastPositionChar }.let { if (it < 0) 0 else it }
             } ?: 0
@@ -139,12 +142,28 @@ class ReaderViewModel(
         viewModelScope.launch(Dispatchers.Default) {
             val now = System.currentTimeMillis()
             val due = ArrayList<TermMatch>()
+            val source = _uiState.value.source
+            val logs = ArrayList<OccurrenceLog>()
             for (idx in toScan) {
                 val chunk = state.chunks.getOrNull(idx) ?: continue
-                val chunkDue = scanner.findDueMatches(chunk.text, state.terms, now)
-                logOccurrences(chunk, chunkDue)
-                due.addAll(chunkDue)
+                val result = scanner.scan(chunk.text, state.terms, now)
+                due.addAll(result.due)
+                if (source != null) {
+                    val dueIds = result.due.mapTo(HashSet()) { it.term.id }
+                    for (m in result.all) {
+                        logs.add(
+                            OccurrenceLog(
+                                termId = m.term.id,
+                                sourceId = source.id,
+                                charOffset = chunk.startChar + m.range.first,
+                                triggeredReview = m.term.id in dueIds,
+                            ),
+                        )
+                    }
+                }
             }
+            // One batched write for the whole visible range instead of an insert per occurrence.
+            termRepository.logOccurrences(logs)
             withContext(Dispatchers.Main) {
                 // Re-check on the main thread: another scan may have queued a prompt meanwhile.
                 if (_uiState.value.pendingFlashcards.isNotEmpty() || _uiState.value.pendingComprehension) {
@@ -235,23 +254,6 @@ class ReaderViewModel(
         if (offset < 0 || offset >= text.length) return "Bookmark"
         val end = (offset + 60).coerceAtMost(text.length)
         return text.substring(offset, end).replace(Regex("\\s+"), " ").trim().ifEmpty { "Bookmark" }
-    }
-
-    private fun logOccurrences(chunk: TextChunk, dueMatches: List<TermMatch>) {
-        val state = _uiState.value
-        val source = state.source ?: return
-        val dueIds = dueMatches.map { it.term.id }.toSet()
-        val all = scanner.findAllMatches(chunk.text, state.terms)
-        viewModelScope.launch {
-            for (m in all) {
-                termRepository.logOccurrence(
-                    termId = m.term.id,
-                    sourceId = source.id,
-                    charOffset = chunk.startChar + m.range.first,
-                    triggeredReview = m.term.id in dueIds,
-                )
-            }
-        }
     }
 
     fun answerFlashcard(rating: Rating, confidence: Confidence) {
