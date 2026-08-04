@@ -3,6 +3,7 @@ package com.flashcardreader.app.theme
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 enum class ReaderPalette { LIGHT, SEPIA, DARK }
@@ -35,8 +36,11 @@ data class ReaderTypography(
     val brightness: Float = -1f,
     /** Night warmth: strength 0..1 of a warm overlay that cuts blue light (0 = off). */
     val warmth: Float = 0f,
+    /** Extra letter spacing (in em); wider tracking measurably eases dyslexic reading. */
+    val letterSpacingEm: Float = 0f,
 ) {
     val fontSize get() = fontSizeSp.sp
     val lineHeight get() = (fontSizeSp * lineHeightMultiplier).sp
     val horizontalMarginDp get() = (24f * marginScale)
+    val letterSpacing get() = letterSpacingEm.em
 }

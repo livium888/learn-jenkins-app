@@ -22,6 +22,7 @@ class ReaderPrefs(private val context: Context) {
         val MARGIN = floatPreferencesKey("margin_scale")
         val BRIGHTNESS = floatPreferencesKey("brightness")
         val WARMTH = floatPreferencesKey("warmth")
+        val LETTER_SPACING = floatPreferencesKey("letter_spacing")
     }
 
     val typography: Flow<ReaderTypography> = context.dataStore.data.map { prefs ->
@@ -34,6 +35,7 @@ class ReaderPrefs(private val context: Context) {
             marginScale = prefs[Keys.MARGIN] ?: 1f,
             brightness = prefs[Keys.BRIGHTNESS] ?: -1f,
             warmth = prefs[Keys.WARMTH] ?: 0f,
+            letterSpacingEm = prefs[Keys.LETTER_SPACING] ?: 0f,
         )
     }
 
@@ -47,6 +49,7 @@ class ReaderPrefs(private val context: Context) {
             prefs[Keys.MARGIN] = typography.marginScale
             prefs[Keys.BRIGHTNESS] = typography.brightness
             prefs[Keys.WARMTH] = typography.warmth
+            prefs[Keys.LETTER_SPACING] = typography.letterSpacingEm
         }
     }
 }

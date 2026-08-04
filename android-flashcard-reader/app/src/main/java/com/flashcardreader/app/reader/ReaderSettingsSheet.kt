@@ -92,6 +92,27 @@ fun ReaderSettingsSheet(
             valueRange = 0.5f..2.5f,
         )
 
+        Label("Letter spacing: ${(typography.letterSpacingEm * 100).toInt()}")
+        Slider(
+            value = typography.letterSpacingEm,
+            onValueChange = { onChange(typography.copy(letterSpacingEm = it)) },
+            valueRange = 0f..0.2f,
+        )
+
+        TextButton(onClick = {
+            onChange(
+                typography.copy(
+                    font = ReaderFont.SANS,
+                    justify = false,
+                    lineHeightMultiplier = 1.8f,
+                    letterSpacingEm = 0.12f,
+                    fontSizeSp = maxOf(typography.fontSizeSp, 20f),
+                ),
+            )
+        }) {
+            Text("Apply dyslexia-friendly preset")
+        }
+
         val systemBrightness = typography.brightness < 0f
         Label(if (systemBrightness) "Brightness: system" else "Brightness: ${(typography.brightness * 100).toInt()}%")
         Slider(

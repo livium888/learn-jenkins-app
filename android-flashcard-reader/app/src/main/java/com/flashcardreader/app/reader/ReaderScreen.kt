@@ -218,6 +218,7 @@ fun ReaderScreen(
             fontFamily = typography.font.family,
             fontSize = typography.fontSize,
             lineHeight = typography.lineHeight,
+            letterSpacing = typography.letterSpacing,
             color = colors.text,
             textAlign = if (typography.justify) TextAlign.Justify else TextAlign.Start,
         )
