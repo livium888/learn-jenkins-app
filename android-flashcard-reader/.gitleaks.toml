@@ -1,0 +1,16 @@
+title = "Flashcard Reader secret-scan config"
+
+# Start from gitleaks' built-in rules, then allowlist the one thing that is intentionally
+# committed and is NOT a real secret: the throwaway debug keystore used for sideloading
+# (a shared debug-signing key so in-place updates work), never a Play Store release key.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional throwaway debug-signing material (committed on purpose, not sensitive)."
+paths = [
+    '''flashcard-debug\.keystore''',
+]
+regexes = [
+    '''flashcardreader''',
+]

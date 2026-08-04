@@ -1,0 +1,54 @@
+name: Android Flashcard Reader - Security Checks
+
+# Lightweight security verification on every change to the app: a secret scan (so an API key
+# or real keystore can never be committed) plus Android Lint's security checks (exported
+# components, cleartext, weak crypto, JS bridges). Runs separately from the APK build so it
+# reports independently and never blocks a build for an unrelated reason.
+on:
+  push:
+    branches:
+      - claude/pdf-ebook-flashcard-app-glfpuk
+    paths:
+      - "android-flashcard-reader/**"
+      - ".github/workflows/android-security-checks.yml"
+  pull_request: {}
+  workflow_dispatch: {}
+
+jobs:
+  security-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-flashcard-reader
+    steps:
+      - uses: actions/checkout@v4
+
+      # Scan the current working tree (not the fork's unrelated history) for committed secrets.
+      - name: Secret scan (gitleaks)
+        run: |
+          VERSION=8.18.4
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks detect --source . --no-git --config .gitleaks.toml --redact --exit-code 1 --verbose
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # Only the security-category checks are enabled (see the app's lint {} block), so this
+      # fails the build on a security regression but not on style/warnings.
+      - name: Android Lint security checks
+        run: ./gradlew :app:lintRelease --stacktrace
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: android-flashcard-reader/app/build/reports/lint-results-release.*
+          if-no-files-found: ignore

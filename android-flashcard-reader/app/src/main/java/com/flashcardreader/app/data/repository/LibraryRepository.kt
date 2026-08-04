@@ -156,17 +156,51 @@ class LibraryRepository(
         }
     }
 
-    /** Imports a book file the user picked via the system file picker (SAF) - never copy/paste. */
+    /**
+     * Imports a book file the user picked via the system file picker (SAF) - never copy/paste.
+     *
+     * Books are untrusted input parsed by hand-rolled/native decoders, so this guards against a
+     * malformed or oversized file taking the app down: the raw file is size-capped before parsing,
+     * parse failures (including [OutOfMemoryError]) are turned into a friendly message instead of a
+     * crash, and the extracted text is length-capped so one pathological book can't exhaust memory.
+     */
     suspend fun importFromFile(uri: Uri, displayName: String): Source = withContext(Dispatchers.IO) {
         val parser = ParserRegistry.forUri(context, uri, displayName)
             ?: throw IllegalArgumentException("Unsupported file type: $displayName (only PDF, EPUB, and MOBI are supported)")
-        val parsed = parser.parse(context, uri, displayName)
+
+        val sizeBytes = fileSizeBytes(uri)
+        if (sizeBytes > MAX_FILE_BYTES) {
+            throw IllegalArgumentException(
+                "That file is too large to import (${sizeBytes / (1024 * 1024)} MB). " +
+                    "The limit is ${MAX_FILE_BYTES / (1024 * 1024)} MB.",
+            )
+        }
+
+        val parsed = try {
+            parser.parse(context, uri, displayName)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e // never swallow coroutine cancellation
+        } catch (e: OutOfMemoryError) {
+            throw IllegalStateException("That file is too large or complex to open on this device.")
+        } catch (e: Exception) {
+            throw IllegalStateException("Couldn't read that file - it may be corrupted or password-protected.")
+        }
+
+        // Keep the beginning if a book is absurdly long; the reader ignores chapter anchors past the end.
+        val text = if (parsed.text.length > MAX_TEXT_CHARS) parsed.text.substring(0, MAX_TEXT_CHARS) else parsed.text
         val type = when (parser) {
             is EpubParser -> SourceType.EPUB
             is PdfParser -> SourceType.PDF
             is MobiParser -> SourceType.MOBI
         }
-        persist(title = parsed.title, type = type, originUri = uri.toString(), text = parsed.text, chapters = parsed.chapters)
+        persist(title = parsed.title, type = type, originUri = uri.toString(), text = text, chapters = parsed.chapters)
+    }
+
+    /** File size in bytes via the content provider, or -1 if it can't be determined. */
+    private fun fileSizeBytes(uri: Uri): Long = try {
+        context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: -1L
+    } catch (e: Exception) {
+        -1L
     }
 
     private suspend fun persist(
@@ -194,5 +228,13 @@ class LibraryRepository(
         }
         val id = sourceDao.insert(source)
         return source.copy(id = id)
+    }
+
+    private companion object {
+        /** Reject a source file bigger than this before parsing (guards the hand-rolled decoders). */
+        const val MAX_FILE_BYTES = 100L * 1024 * 1024
+
+        /** Cap on extracted characters kept (~24 MB of text); far beyond any normal book. */
+        const val MAX_TEXT_CHARS = 12_000_000
     }
 }

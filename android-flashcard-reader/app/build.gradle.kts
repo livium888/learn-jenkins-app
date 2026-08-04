@@ -93,6 +93,21 @@ android {
     packaging {
         resources.excludes.add("META-INF/*")
     }
+
+    lint {
+        // CI security gate: run only the security-relevant checks and fail on them, so an
+        // accidental regression (an exported component, cleartext, weak RNG, a JS bridge, etc.)
+        // breaks the build. Scoped with checkOnly so unrelated style/warnings never gate.
+        checkOnly += setOf(
+            "ExportedActivity", "ExportedService", "ExportedReceiver", "ExportedContentProvider",
+            "GrantAllUris", "SetJavaScriptEnabled", "AddJavascriptInterface",
+            "TrustAllX509TrustManager", "BadHostnameVerifier", "InsecureBaseConfiguration",
+            "CleartextTraffic", "UnsafeDynamicallyLoadedCode", "SecureRandom", "TrulyRandom",
+            "WorldReadableFiles", "WorldWriteableFiles", "HardcodedDebugMode",
+        )
+        abortOnError = true
+        warningsAsErrors = true
+    }
 }
 
 dependencies {

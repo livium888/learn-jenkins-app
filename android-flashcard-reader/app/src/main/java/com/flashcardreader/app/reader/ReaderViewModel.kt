@@ -15,6 +15,7 @@ import com.flashcardreader.app.data.repository.TermRepository
 import com.flashcardreader.app.theme.ReaderPrefs
 import com.flashcardreader.app.theme.ReaderTypography
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -75,6 +76,9 @@ class ReaderViewModel(
     /** Char offset of the last comprehension prompt, so we prompt again after a stretch of reading. */
     private var lastRecallOffset = 0
     private val recallThresholdChars = 12000
+
+    /** The in-flight in-book search, cancelled when a new query arrives. */
+    private var searchJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -226,26 +230,36 @@ class ReaderViewModel(
     /**
      * Finds every occurrence of [query] in the book (case-insensitive), capped so a very common
      * word can't build a huge list, each with a snippet of surrounding text for the results list.
+     *
+     * The scan walks the whole book, so it runs on a background dispatcher to keep typing in the
+     * search box responsive; the query is reflected immediately and results arrive when ready.
+     * A new keystroke cancels the previous, still-running scan.
      */
     fun search(query: String) {
-        val text = _uiState.value.fullText
+        searchJob?.cancel()
         if (query.isBlank()) {
             _uiState.update { it.copy(searchQuery = "", searchResults = emptyList()) }
             return
         }
-        val hits = ArrayList<SearchHit>()
-        var idx = text.indexOf(query, 0, ignoreCase = true)
-        while (idx >= 0 && hits.size < 300) {
-            val start = (idx - 30).coerceAtLeast(0)
-            val end = (idx + query.length + 30).coerceAtMost(text.length)
-            val snippet = text.substring(start, end).replace(Regex("\\s+"), " ").trim()
-            hits.add(SearchHit(idx, snippet))
-            idx = text.indexOf(query, idx + query.length, ignoreCase = true)
+        _uiState.update { it.copy(searchQuery = query) }
+        val text = _uiState.value.fullText
+        searchJob = viewModelScope.launch(Dispatchers.Default) {
+            val whitespace = Regex("\\s+")
+            val hits = ArrayList<SearchHit>()
+            var idx = text.indexOf(query, 0, ignoreCase = true)
+            while (idx >= 0 && hits.size < 300) {
+                val start = (idx - 30).coerceAtLeast(0)
+                val end = (idx + query.length + 30).coerceAtMost(text.length)
+                val snippet = text.substring(start, end).replace(whitespace, " ").trim()
+                hits.add(SearchHit(idx, snippet))
+                idx = text.indexOf(query, idx + query.length, ignoreCase = true)
+            }
+            _uiState.update { it.copy(searchResults = hits) }
         }
-        _uiState.update { it.copy(searchQuery = query, searchResults = hits) }
     }
 
     fun clearSearch() {
+        searchJob?.cancel()
         _uiState.update { it.copy(searchQuery = "", searchResults = emptyList()) }
     }
 
