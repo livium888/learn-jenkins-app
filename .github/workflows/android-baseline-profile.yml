@@ -1,11 +1,17 @@
 name: Android Flashcard Reader - Baseline Profile
 
-# Manual only: profile generation boots an emulator (slow, and not needed on every push).
-# Run it after a change that meaningfully alters startup/scroll hot paths. It commits the
-# generated profile back to the branch, which re-triggers the normal APK build so the next
-# release APK bakes the profile in.
+# Profile generation boots an emulator (slow), so it runs only when the profiling module
+# itself changes - not on every app push. It commits the generated profile back to the branch,
+# which re-triggers the normal APK build so the next release APK bakes the profile in. Can also
+# be run by hand from the Actions tab.
 on:
   workflow_dispatch: {}
+  push:
+    branches:
+      - claude/pdf-ebook-flashcard-app-glfpuk
+    paths:
+      - "android-flashcard-reader/baselineprofile/**"
+      - ".github/workflows/android-baseline-profile.yml"
 
 jobs:
   generate-baseline-profile:
