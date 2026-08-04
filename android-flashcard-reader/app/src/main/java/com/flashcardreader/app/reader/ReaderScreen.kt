@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.view.WindowManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -254,15 +256,17 @@ fun ReaderScreen(
                         chunk = chunk,
                         style = style,
                         accent = colors.accent,
-                        pressing = pressingRange,
+                        selecting = pressingRange,
                         selected = selectedRange,
-                        onPress = { pressingRange = it },
-                        onClear = { selectedRange = null },
-                        onSelectWord = { word, range ->
+                        onSelecting = { pressingRange = it },
+                        onClear = { selectedRange = null; pressingRange = null },
+                        onSelectPhrase = { phrase, range ->
                             selectedRange = range
-                            val existing = state.terms.find { it.normalizedText == word.lowercase() }
+                            pressingRange = null
+                            val cleaned = phrase.trim()
+                            val existing = state.terms.find { it.normalizedText == cleaned.lowercase() }
                             val sentence = ContextExtractor.sentenceAround(state.fullText, range.first, range.last + 1)
-                            flashcardPrefill = FlashcardPrefill(word, existing?.definition.orEmpty(), sentence)
+                            flashcardPrefill = FlashcardPrefill(cleaned, existing?.definition.orEmpty(), sentence)
                         },
                     )
                 }
@@ -582,24 +586,32 @@ private fun chunkIndexForOffset(chunks: List<TextChunk>, offset: Int): Int {
 }
 
 /**
- * One block of the book. Long-press a word to highlight it and open its flashcard; a plain
- * tap clears the highlight. Highlight ranges arrive as absolute offsets into the full book
- * text and are intersected with this chunk's own slice for rendering.
+ * One block of the book. Selection works like native text selection: long-press a word to grab
+ * it, then keep your finger down and drag across adjacent words to extend the highlight over a
+ * whole name or phrase; lift to tag it. A plain tap clears the highlight. [selecting] is the live
+ * highlight during a drag; [selected] is the committed one. Ranges are absolute offsets into the
+ * full book text and are intersected with this chunk's own slice for rendering.
  */
 @Composable
 private fun ChunkText(
     chunk: TextChunk,
     style: TextStyle,
     accent: Color,
-    pressing: IntRange?,
+    selecting: IntRange?,
     selected: IntRange?,
-    onPress: (IntRange?) -> Unit,
+    onSelecting: (IntRange?) -> Unit,
     onClear: () -> Unit,
-    onSelectWord: (word: String, range: IntRange) -> Unit,
+    onSelectPhrase: (text: String, range: IntRange) -> Unit,
 ) {
     var layout by remember(chunk.startChar) { mutableStateOf<TextLayoutResult?>(null) }
+    // Word ranges (local to this chunk) anchoring the current drag selection.
+    var anchor by remember(chunk.startChar, chunk.text) { mutableStateOf<IntRange?>(null) }
+    var cursor by remember(chunk.startChar, chunk.text) { mutableStateOf<IntRange?>(null) }
 
-    val annotated = remember(chunk.text, chunk.startChar, pressing, selected, accent) {
+    fun abs(local: IntRange) = (chunk.startChar + local.first)..(chunk.startChar + local.last)
+    fun wordAt(offset: Offset): IntRange? = layout?.let { wordRangeAt(chunk.text, it.getOffsetForPosition(offset)) }
+
+    val annotated = remember(chunk.text, chunk.startChar, selecting, selected, accent) {
         buildAnnotatedString {
             append(chunk.text)
             fun applyAbsolute(range: IntRange?, alpha: Float) {
@@ -609,7 +621,7 @@ private fun ChunkText(
                 if (start < end) addStyle(SpanStyle(background = accent.copy(alpha = alpha)), start, end)
             }
             applyAbsolute(selected, 0.32f)
-            applyAbsolute(pressing, 0.18f)
+            applyAbsolute(selecting, 0.24f)
         }
     }
 
@@ -620,25 +632,43 @@ private fun ChunkText(
         modifier = Modifier
             .fillMaxWidth()
             .pointerInput(chunk.startChar, chunk.text) {
-                detectTapGestures(
-                    onPress = { offset ->
-                        val abs = layout?.let { l ->
-                            wordRangeAt(chunk.text, l.getOffsetForPosition(offset))
-                                ?.let { (chunk.startChar + it.first)..(chunk.startChar + it.last) }
-                        }
-                        onPress(abs)
-                        tryAwaitRelease()
-                        onPress(null)
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { offset ->
+                        val w = wordAt(offset)
+                        anchor = w
+                        cursor = w
+                        if (w != null) onSelecting(abs(w))
                     },
-                    onTap = { onClear() },
-                    onLongPress = { offset ->
-                        val local = layout?.let { wordRangeAt(chunk.text, it.getOffsetForPosition(offset)) }
-                        if (local != null) {
-                            val word = chunk.text.substring(local.first, (local.last + 1).coerceAtMost(chunk.text.length))
-                            onSelectWord(word, (chunk.startChar + local.first)..(chunk.startChar + local.last))
+                    onDrag = { change, _ ->
+                        val a = anchor
+                        val w = wordAt(change.position)
+                        if (a != null && w != null) {
+                            cursor = w
+                            onSelecting(abs(minOf(a.first, w.first)..maxOf(a.last, w.last)))
                         }
+                    },
+                    onDragEnd = {
+                        val a = anchor
+                        val c = cursor
+                        if (a != null && c != null) {
+                            val lo = minOf(a.first, c.first)
+                            val hi = maxOf(a.last, c.last)
+                            val text = chunk.text.substring(lo, (hi + 1).coerceAtMost(chunk.text.length))
+                            onSelectPhrase(text, (chunk.startChar + lo)..(chunk.startChar + hi))
+                        }
+                        onSelecting(null)
+                        anchor = null
+                        cursor = null
+                    },
+                    onDragCancel = {
+                        onSelecting(null)
+                        anchor = null
+                        cursor = null
                     },
                 )
+            }
+            .pointerInput(chunk.startChar) {
+                detectTapGestures(onTap = { onClear() })
             },
     )
 }

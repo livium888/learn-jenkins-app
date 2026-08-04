@@ -1,8 +1,6 @@
 package com.flashcardreader.app.reader
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,6 +19,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import com.flashcardreader.app.data.reference.DictionaryClient
 import com.flashcardreader.app.ui.AppDialog
@@ -29,17 +28,13 @@ import com.flashcardreader.app.ui.PrimaryButton
 import kotlinx.coroutines.launch
 
 /**
- * Tap a word in the reader (or use the "+" button for anything not on screen) and write
- * your own definition here - no copy/paste round trip into another app. If the word is
- * already tracked, [prefilledDefinition] carries its existing definition so this doubles
- * as an edit screen.
+ * Confirm and define a word or phrase captured in the reader (a name/place is selected there by
+ * long-pressing and dragging across the words, so it arrives here already whole). If the term is
+ * already tracked, [prefilledDefinition] carries its definition so this doubles as an edit screen.
  *
- * For a NEW card with a [contextSentence], the sentence is shown as tappable words so a
- * multi-word name or place ("King's Landing") can be captured by tapping across it, and the
- * capture is framed as a *guess from context* (pretesting / errorful-generation effect).
- * A free "Look it up" fills a starting definition from Wiktionary/Wikipedia, still editable.
+ * Capture is framed as a *guess from context* (pretesting / errorful-generation effect), and a
+ * free "Look it up" can seed a definition from Wiktionary/Wikipedia, still editable.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddFlashcardDialog(
     prefilledText: String,
@@ -56,16 +51,6 @@ fun AddFlashcardDialog(
     var looking by remember { mutableStateOf(false) }
     var lookupNote by remember { mutableStateOf<String?>(null) }
 
-    // Sentence broken into words, for tap-to-extend multi-word capture.
-    val tokens = remember(contextSentence) {
-        if (contextSentence.isBlank()) emptyList()
-        else contextSentence.split(Regex("\\s+")).filter { it.isNotBlank() }
-    }
-    val anchor = remember(tokens) {
-        tokens.indexOfFirst { cleanEnds(it).equals(prefilledText.trim(), ignoreCase = true) }.let { if (it < 0) 0 else it }
-    }
-    var selRange by remember { mutableStateOf(anchor..anchor) }
-
     AppDialog(onDismiss = onDismiss) {
         Text(if (isNew) "Add flashcard" else "Edit flashcard", style = MaterialTheme.typography.titleLarge)
 
@@ -78,34 +63,7 @@ fun AddFlashcardDialog(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        if (isNew && tokens.size > 1) {
-            Text(
-                "Tap words to include a full name or phrase.",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                tokens.forEachIndexed { i, token ->
-                    val selected = i in selRange
-                    Surface(
-                        onClick = {
-                            val r = minOf(anchor, i)..maxOf(anchor, i)
-                            selRange = r
-                            term = cleanEnds(tokens.subList(r.first, r.last + 1).joinToString(" "))
-                        },
-                        shape = MaterialTheme.shapes.small,
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) {
-                        Text(token, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
-                    }
-                }
-            }
-        } else if (isNew && contextSentence.isNotBlank()) {
+        if (isNew && contextSentence.isNotBlank()) {
             Surface(
                 shape = MaterialTheme.shapes.medium,
                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -114,13 +72,10 @@ fun AddFlashcardDialog(
             ) {
                 Text(
                     "“$contextSentence”",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                 )
             }
-        }
-
-        if (isNew && contextSentence.isNotBlank()) {
             Text(
                 "Guess the meaning from context first — attempting it yourself helps it stick.",
                 style = MaterialTheme.typography.labelMedium,
@@ -173,6 +128,3 @@ fun AddFlashcardDialog(
         OutlineButton(text = "Cancel", onClick = onDismiss)
     }
 }
-
-/** Trims leading/trailing punctuation (keeps inner apostrophes/hyphens), e.g. "Landing." -> "Landing". */
-private fun cleanEnds(s: String): String = s.trim { !it.isLetterOrDigit() }
