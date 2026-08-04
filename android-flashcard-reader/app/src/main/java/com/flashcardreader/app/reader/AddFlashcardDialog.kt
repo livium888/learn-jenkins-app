@@ -57,8 +57,8 @@ fun AddFlashcardDialog(
     val scope = rememberCoroutineScope()
     var looking by remember { mutableStateOf(false) }
     var lookupNote by remember { mutableStateOf<String?>(null) }
-    var lang by remember { mutableStateOf(dictPrefs.language) }
-    var langMenuOpen by remember { mutableStateOf(false) }
+    var readingLang by remember { mutableStateOf(dictPrefs.readingLanguage) }
+    var explanationLang by remember { mutableStateOf(dictPrefs.explanationLanguage) }
 
     AppDialog(onDismiss = onDismiss) {
         Text(if (isNew) "Add flashcard" else "Edit flashcard", style = MaterialTheme.typography.titleLarge)
@@ -112,7 +112,7 @@ fun AddFlashcardDialog(
                         looking = true
                         lookupNote = null
                         scope.launch {
-                            val found = DictionaryClient.lookup(term.trim(), lang)
+                            val found = DictionaryClient.lookup(term.trim(), readingLang, explanationLang)
                             if (found != null) {
                                 definition = if (found.length > 400) found.take(400).trimEnd() + "…" else found
                             } else {
@@ -123,26 +123,15 @@ fun AddFlashcardDialog(
                     },
                     enabled = term.isNotBlank(),
                 ) { Text("Look it up") }
-
-                // Language of the definition (which Wiktionary/Wikipedia edition to query).
-                Box {
-                    TextButton(onClick = { langMenuOpen = true }) {
-                        Text("${DictionaryPrefs.labelFor(lang)} ▾")
-                    }
-                    DropdownMenu(expanded = langMenuOpen, onDismissRequest = { langMenuOpen = false }) {
-                        DictionaryPrefs.LANGUAGES.forEach { (code, label) ->
-                            DropdownMenuItem(
-                                text = { Text(label) },
-                                onClick = {
-                                    lang = code
-                                    dictPrefs.language = code
-                                    langMenuOpen = false
-                                },
-                            )
-                        }
-                    }
-                }
             }
+        }
+
+        // "Word in [Spanish] → explain in [English]" — set once, remembered.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Word in", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LangDropdown(readingLang) { readingLang = it; dictPrefs.readingLanguage = it }
+            Text("→ explain in", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LangDropdown(explanationLang) { explanationLang = it; dictPrefs.explanationLanguage = it }
         }
         lookupNote?.let {
             Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -154,5 +143,22 @@ fun AddFlashcardDialog(
             onClick = { if (term.isNotBlank()) onSave(term.trim(), definition.trim()) },
         )
         OutlineButton(text = "Cancel", onClick = onDismiss)
+    }
+}
+
+/** A compact language picker showing the current language and a dropdown of the offered ones. */
+@Composable
+private fun LangDropdown(current: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) { Text("${DictionaryPrefs.labelFor(current)} ▾") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DictionaryPrefs.LANGUAGES.forEach { (code, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = { onSelect(code); open = false },
+                )
+            }
+        }
     }
 }

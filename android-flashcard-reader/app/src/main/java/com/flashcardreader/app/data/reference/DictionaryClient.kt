@@ -18,40 +18,56 @@ import java.net.URLEncoder
  */
 object DictionaryClient {
 
-    /** [lang] is a Wikimedia edition code ("en", "fr", "de", …); definitions come back in it. */
-    suspend fun lookup(query: String, lang: String = "en"): String? = withContext(Dispatchers.IO) {
+    /**
+     * Looks up [query] and returns an explanation written in [explanationLang]. [readingLang] is
+     * the language of the word itself: the Wiktionary response is queried on the explanation-
+     * language edition (so definitions are in that language) but the reading-language section is
+     * preferred, giving "Spanish word → English explanation" and disambiguating homographs.
+     */
+    suspend fun lookup(
+        query: String,
+        readingLang: String = "en",
+        explanationLang: String = "en",
+    ): String? = withContext(Dispatchers.IO) {
         val q = query.trim()
         if (q.isEmpty()) return@withContext null
         // A capitalised or multi-word term is probably a name/place -> Wikipedia first.
         val looksLikeName = q.contains(' ') || (q.firstOrNull()?.isUpperCase() == true)
-        if (looksLikeName) wikipedia(q, lang) ?: wiktionary(q, lang) else wiktionary(q, lang) ?: wikipedia(q, lang)
+        if (looksLikeName) {
+            wikipedia(q, explanationLang) ?: wiktionary(q, readingLang, explanationLang)
+        } else {
+            wiktionary(q, readingLang, explanationLang) ?: wikipedia(q, explanationLang)
+        }
     }
 
-    private fun wiktionary(word: String, lang: String): String? {
-        val json = httpGet("https://$lang.wiktionary.org/api/rest_v1/page/definition/${enc(word)}") ?: return null
+    private fun wiktionary(word: String, readingLang: String, explanationLang: String): String? {
+        val json = httpGet("https://$explanationLang.wiktionary.org/api/rest_v1/page/definition/${enc(word)}") ?: return null
         return try {
             val root = JSONObject(json)
-            // The response is keyed by the word's language(s); the definition text itself is in the
-            // edition's language. Take the first non-blank definition from any section (not just "en").
+            // Prefer the section for the language being read (disambiguates cognates/homographs)…
+            firstDefinition(root.optJSONArray(readingLang))?.let { return it }
+            // …otherwise fall back to the first non-blank definition from any language section.
             val keys = root.keys()
-            var result: String? = null
-            outer@ while (keys.hasNext()) {
-                val section = root.optJSONArray(keys.next()) ?: continue
-                for (i in 0 until section.length()) {
-                    val defs = section.getJSONObject(i).optJSONArray("definitions") ?: continue
-                    for (j in 0 until defs.length()) {
-                        val text = Jsoup.parse(defs.getJSONObject(j).optString("definition", "")).text().trim()
-                        if (text.isNotBlank()) {
-                            result = text
-                            break@outer
-                        }
-                    }
-                }
+            while (keys.hasNext()) {
+                firstDefinition(root.optJSONArray(keys.next()))?.let { return it }
             }
-            result
+            null
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** First non-blank, HTML-stripped definition in a Wiktionary language section, or null. */
+    private fun firstDefinition(section: org.json.JSONArray?): String? {
+        if (section == null) return null
+        for (i in 0 until section.length()) {
+            val defs = section.getJSONObject(i).optJSONArray("definitions") ?: continue
+            for (j in 0 until defs.length()) {
+                val text = Jsoup.parse(defs.getJSONObject(j).optString("definition", "")).text().trim()
+                if (text.isNotBlank()) return text
+            }
+        }
+        return null
     }
 
     private fun wikipedia(title: String, lang: String): String? {
