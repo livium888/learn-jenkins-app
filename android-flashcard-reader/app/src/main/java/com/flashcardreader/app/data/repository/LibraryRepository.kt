@@ -5,6 +5,8 @@ import android.net.Uri
 import com.flashcardreader.app.data.db.dao.SourceDao
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.SourceType
+import com.flashcardreader.app.data.gutenberg.GutenbergBook
+import com.flashcardreader.app.data.gutenberg.GutenbergClient
 import com.flashcardreader.app.data.parser.Chapter
 import com.flashcardreader.app.data.parser.EpubParser
 import com.flashcardreader.app.data.parser.MobiParser
@@ -136,6 +138,21 @@ class LibraryRepository(
                     writer.newLine()
                 }
             }
+        }
+    }
+
+    /**
+     * Downloads a Project Gutenberg book's EPUB and runs it through the exact same import
+     * pipeline as a picked file: the EPUB is fetched to a temp file, parsed (title, text,
+     * chapters), cached, and inserted as an ordinary Source.
+     */
+    suspend fun importFromGutenberg(book: GutenbergBook): Source = withContext(Dispatchers.IO) {
+        val temp = File.createTempFile("gutenberg", ".epub", cacheDir)
+        try {
+            GutenbergClient.download(book, temp)
+            importFromFile(Uri.fromFile(temp), "${book.title}.epub")
+        } finally {
+            temp.delete()
         }
     }
 

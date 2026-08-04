@@ -11,6 +11,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.flashcardreader.app.FlashcardReaderApp
 import com.flashcardreader.app.ai.AiSettingsScreen
+import com.flashcardreader.app.gutenberg.GutenbergScreen
+import com.flashcardreader.app.gutenberg.GutenbergViewModel
 import com.flashcardreader.app.library.LibraryScreen
 import com.flashcardreader.app.library.LibraryViewModel
 import com.flashcardreader.app.reader.ReaderScreen
@@ -27,6 +29,7 @@ private const val ROUTE_REVIEW = "review"
 private const val ROUTE_WORDS = "words"
 private const val ROUTE_STATS = "stats"
 private const val ROUTE_AI = "ai-settings"
+private const val ROUTE_GUTENBERG = "gutenberg"
 private const val ROUTE_READER = "reader/{sourceId}"
 
 @Composable
@@ -44,7 +47,14 @@ fun AppNavGraph(app: FlashcardReaderApp) {
                 onOpenReview = { navController.navigate(ROUTE_REVIEW) },
                 onOpenWords = { navController.navigate(ROUTE_WORDS) },
                 onOpenStats = { navController.navigate(ROUTE_STATS) },
+                onOpenGutenberg = { navController.navigate(ROUTE_GUTENBERG) },
             )
+        }
+        composable(ROUTE_GUTENBERG) {
+            val viewModel: GutenbergViewModel = viewModel(
+                factory = viewModelFactory { initializer { GutenbergViewModel(app.libraryRepository) } },
+            )
+            GutenbergScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
         composable(ROUTE_REVIEW) {
             val viewModel: ReviewViewModel = viewModel(

@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
@@ -55,6 +56,7 @@ fun LibraryScreen(
     onOpenReview: () -> Unit,
     onOpenWords: () -> Unit,
     onOpenStats: () -> Unit,
+    onOpenGutenberg: () -> Unit,
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -78,6 +80,7 @@ fun LibraryScreen(
     Scaffold(
         topBar = {
             AppTopBar(title = "My Library") {
+                IconButton(onClick = onOpenGutenberg) { Icon(Icons.Filled.CloudDownload, contentDescription = "Free books") }
                 IconButton(onClick = onOpenStats) { Icon(Icons.Filled.Info, contentDescription = "Progress") }
                 IconButton(onClick = onOpenWords) { Icon(Icons.Filled.List, contentDescription = "My words") }
                 IconButton(onClick = onOpenReview) { Icon(Icons.Filled.Refresh, contentDescription = "Review due cards") }
@@ -114,7 +117,7 @@ fun LibraryScreen(
             if (sources.isEmpty() && !uiState.importing) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        "No books yet.\nTap “Add book” to open a PDF, EPUB, or MOBI.",
+                        "No books yet.\nTap “Add book” to open a PDF, EPUB, or MOBI —\nor the ☁ icon above to browse thousands of free classics.",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
