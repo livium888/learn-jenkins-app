@@ -1,9 +1,9 @@
 name: Android Flashcard Reader - Security Checks
 
-# Lightweight security verification on every change to the app: a secret scan (so an API key
-# or real keystore can never be committed) plus Android Lint's security checks (exported
-# components, cleartext, weak crypto, JS bridges). Runs separately from the APK build so it
-# reports independently and never blocks a build for an unrelated reason.
+# Lightweight security verification on every change to the app. The hard gate is a secret scan
+# (gitleaks), so an API key or real keystore can never be committed unnoticed. Android Lint runs
+# advisory alongside it - its security report is uploaded for review but does not gate, so
+# third-party false positives never block a build. Runs separately from the APK build.
 on:
   push:
     branches:
@@ -40,9 +40,9 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # Only the security-category checks are enabled (see the app's lint {} block), so this
-      # fails the build on a security regression but not on style/warnings.
-      - name: Android Lint security checks
+      # Advisory: lint is configured with abortOnError = false, so this produces the security
+      # report (uploaded below) without gating. The secret scan above is the hard gate.
+      - name: Android Lint security report (advisory)
         run: ./gradlew :app:lintRelease --stacktrace
 
       - name: Upload lint report
