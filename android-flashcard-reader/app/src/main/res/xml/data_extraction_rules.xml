@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup + device-to-device transfer rules for Android 12+ (dataExtractionRules).
+  Same intent as backup_rules.xml: exclude the AI-tutor stores (which hold the Gemini API key)
+  from both cloud backup and phone-to-phone transfer, while everything else carries over.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="ai_prefs.xml" />
+        <exclude domain="sharedpref" path="ai_prefs_secure.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="ai_prefs.xml" />
+        <exclude domain="sharedpref" path="ai_prefs_secure.xml" />
+    </device-transfer>
+</data-extraction-rules>

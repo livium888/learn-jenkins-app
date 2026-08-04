@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup rules for Android 11 and below (fullBackupContent). Everything is backed up by
+  default (so flashcards/reading state survive a reinstall) EXCEPT the AI-tutor stores, which
+  hold the Gemini API key. Keeping a credential out of the cloud backup is the point.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="ai_prefs.xml" />
+    <exclude domain="sharedpref" path="ai_prefs_secure.xml" />
+</full-backup-content>

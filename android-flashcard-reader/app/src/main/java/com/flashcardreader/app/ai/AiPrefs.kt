@@ -1,15 +1,24 @@
 package com.flashcardreader.app.ai
 
 import android.content.Context
+import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 
 /**
  * Settings for the optional AI tutor. Bring-your-own-key: the Gemini API key is entered by
  * the user and stored only in this app's private storage on the device - it is never
  * committed to the repo or sent anywhere but Google's API. The tutor is off by default and
  * only ever called on an explicit tap.
+ *
+ * The key is a credential, so the backing store is an [EncryptedSharedPreferences] file
+ * (AES-256, key wrapped by the Android Keystore) instead of plaintext prefs. If the platform
+ * can't provide one - some devices/emulators fail keystore init - it falls back to the old
+ * private prefs so the tutor never breaks; either way the store is excluded from cloud backup
+ * and device-to-device transfer (see res/xml backup rules), which was the main exposure.
  */
 class AiPrefs(context: Context) {
-    private val prefs = context.getSharedPreferences("ai_prefs", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = securePrefs(context) ?: plainPrefs(context)
 
     // Defaults on: providing a key is itself the opt-in, so the tutor is ready as soon as a
     // key exists. The toggle stays as an explicit off switch that keeps the key.
@@ -42,6 +51,45 @@ class AiPrefs(context: Context) {
         private const val KEY_MODEL = "model"
         private const val KEY_LANG = "language"
         private const val KEY_PROMPT = "prompt"
+
+        private const val PLAIN_FILE = "ai_prefs"
+        private const val SECURE_FILE = "ai_prefs_secure"
+
+        private fun plainPrefs(context: Context): SharedPreferences =
+            context.getSharedPreferences(PLAIN_FILE, Context.MODE_PRIVATE)
+
+        /**
+         * The encrypted store, or null if the platform can't build one. On first success it
+         * migrates a key left in the old plaintext file, verifying the encrypted write before
+         * clearing the plaintext copy so a failure can never lose the user's key.
+         */
+        private fun securePrefs(context: Context): SharedPreferences? = try {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            val secure = EncryptedSharedPreferences.create(
+                context,
+                SECURE_FILE,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+            migratePlaintextKey(context, secure)
+            secure
+        } catch (e: Exception) {
+            null
+        }
+
+        private fun migratePlaintextKey(context: Context, secure: SharedPreferences) {
+            val plain = plainPrefs(context)
+            val oldKey = plain.getString(KEY_API, "").orEmpty()
+            if (oldKey.isNotBlank() && secure.getString(KEY_API, "").isNullOrBlank()) {
+                secure.edit().putString(KEY_API, oldKey).commit()
+                if (secure.getString(KEY_API, "") == oldKey) {
+                    plain.edit().remove(KEY_API).apply()
+                }
+            }
+        }
 
         const val DEFAULT_MODEL = "gemini-1.5-flash"
         const val DEFAULT_LANGUAGE = "English"

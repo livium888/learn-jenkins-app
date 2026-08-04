@@ -9,3 +9,9 @@
 .cxx
 local.properties
 **/build/
+
+# Release signing secrets - never commit these. The throwaway debug keystore
+# (app/flashcard-debug.keystore) is intentionally tracked; a real release key is not.
+keystore.properties
+release.keystore
+*.jks

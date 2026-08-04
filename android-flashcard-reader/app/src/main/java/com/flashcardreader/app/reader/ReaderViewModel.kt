@@ -13,11 +13,13 @@ import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.repository.TermRepository
 import com.flashcardreader.app.theme.ReaderPrefs
 import com.flashcardreader.app.theme.ReaderTypography
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * One item in the scrolling reader; [startChar] is this slice's offset into the full book text.
@@ -102,6 +104,11 @@ class ReaderViewModel(
      * Persists the reading position and scans any newly-revealed chunk for due terms -
      * this is the scroll-mode replacement for the old "landed on a page" trigger: a due
      * word fires its flashcard the moment it scrolls into view.
+     *
+     * The regex scan (and the occurrence-log DB writes) run on a background dispatcher so
+     * scrolling stays smooth as the tracked-word list grows. The chunks to scan are claimed
+     * synchronously here (adding them to [scannedChunks]) so overlapping scroll callbacks
+     * never schedule the same chunk twice; the results are posted back on the main thread.
      */
     fun onVisibleRange(firstVisible: Int, lastVisible: Int) {
         val state = _uiState.value
@@ -117,26 +124,47 @@ class ReaderViewModel(
 
         if (state.pendingFlashcards.isNotEmpty() || state.pendingComprehension) return // one prompt at a time
 
-        val now = System.currentTimeMillis()
-        val due = mutableListOf<TermMatch>()
+        // Claim the not-yet-scanned chunks now (set.add returns false if already claimed),
+        // so a burst of scroll callbacks doesn't scan the same chunk on several threads.
+        val toScan = ArrayList<Int>()
         for (idx in firstVisible..lastVisible) {
-            if (idx in scannedChunks) continue
-            val chunk = state.chunks.getOrNull(idx) ?: continue
-            scannedChunks.add(idx)
-            val chunkDue = scanner.findDueMatches(chunk.text, state.terms, now)
-            logOccurrences(chunk, chunkDue)
-            due.addAll(chunkDue)
+            if (scannedChunks.add(idx)) toScan.add(idx)
         }
-        if (due.isNotEmpty()) {
-            val seen = HashSet<Long>()
-            val queue = due.filter { seen.add(it.term.id) }
-            _uiState.update { it.copy(pendingFlashcards = queue) }
+        val firstStart = state.chunks.getOrNull(firstVisible)?.startChar ?: 0
+        if (toScan.isEmpty()) {
+            maybePromptComprehension(firstStart)
             return
         }
 
-        // No flashcard due here - after a stretch of new reading, prompt a comprehension
-        // free-recall ("what was this about?"), the strongest study technique for prose.
-        val firstStart = state.chunks.getOrNull(firstVisible)?.startChar ?: 0
+        viewModelScope.launch(Dispatchers.Default) {
+            val now = System.currentTimeMillis()
+            val due = ArrayList<TermMatch>()
+            for (idx in toScan) {
+                val chunk = state.chunks.getOrNull(idx) ?: continue
+                val chunkDue = scanner.findDueMatches(chunk.text, state.terms, now)
+                logOccurrences(chunk, chunkDue)
+                due.addAll(chunkDue)
+            }
+            withContext(Dispatchers.Main) {
+                // Re-check on the main thread: another scan may have queued a prompt meanwhile.
+                if (_uiState.value.pendingFlashcards.isNotEmpty() || _uiState.value.pendingComprehension) {
+                    return@withContext
+                }
+                if (due.isNotEmpty()) {
+                    val seen = HashSet<Long>()
+                    val queue = due.filter { seen.add(it.term.id) }
+                    _uiState.update { it.copy(pendingFlashcards = queue) }
+                } else {
+                    // No flashcard due here - after a stretch of new reading, prompt a comprehension
+                    // free-recall ("what was this about?"), the strongest study technique for prose.
+                    maybePromptComprehension(firstStart)
+                }
+            }
+        }
+    }
+
+    /** Prompts a free-recall check once a stretch of new text has been read past the last one. */
+    private fun maybePromptComprehension(firstStart: Int) {
         if (firstStart - lastRecallOffset >= recallThresholdChars) {
             lastRecallOffset = firstStart
             _uiState.update { it.copy(pendingComprehension = true) }

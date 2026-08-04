@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Every endpoint the app talks to (Gemini, Wikimedia, Gutendex, the font CDN) is HTTPS.
+  Asserting cleartext-off here makes that a build-enforced guarantee: an accidental http://
+  URL fails instead of silently sending traffic in the clear.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

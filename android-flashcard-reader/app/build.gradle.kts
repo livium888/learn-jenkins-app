@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
 }
+
+// Optional release-signing config. Values come from a gitignored keystore.properties at the
+// project root, or from RELEASE_* environment variables (e.g. CI secrets). Nothing secret is
+// committed: when neither is present, a `release` build is simply left unsigned - the debug
+// build used for sideloading is unaffected. This is the seam a Play Store release plugs into.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+fun releaseSecret(propKey: String, envKey: String): String? =
+    keystoreProps.getProperty(propKey) ?: System.getenv(envKey)
+val hasReleaseSigning = releaseSecret("storeFile", "RELEASE_STORE_FILE") != null
 
 android {
     namespace = "com.flashcardreader.app"
@@ -29,11 +43,25 @@ android {
             keyAlias = "flashcard"
             keyPassword = "flashcardreader"
         }
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseSecret("storeFile", "RELEASE_STORE_FILE")!!)
+                storePassword = releaseSecret("storePassword", "RELEASE_STORE_PASSWORD")
+                keyAlias = releaseSecret("keyAlias", "RELEASE_KEY_ALIAS")
+                keyPassword = releaseSecret("keyPassword", "RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         getByName("debug") {
             signingConfig = signingConfigs.getByName("stable")
+        }
+        getByName("release") {
+            // Real Play Store signing when a keystore is supplied; otherwise left unsigned
+            // (the debug build is the one used for sideloading, so this never blocks CI).
+            isMinifyEnabled = false
+            signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release") else null
         }
     }
 
@@ -84,6 +112,9 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+
+    // Encrypts the AI-tutor API key at rest (AES-256, key wrapped by the Android Keystore).
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // Scheduled evening/morning review reminder notifications.
     implementation("androidx.work:work-runtime-ktx:2.9.1")
