@@ -36,7 +36,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.ui.AppTopBar
+import com.flashcardreader.app.ui.ConfirmDialog
 import com.flashcardreader.app.ui.Spacing
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,6 +65,7 @@ fun LibraryScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var pendingDelete by remember { mutableStateOf<Source?>(null) }
 
     val openDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -130,11 +134,20 @@ fun LibraryScreen(
                     verticalArrangement = Arrangement.spacedBy(Spacing.tight + 4.dp),
                 ) {
                     items(sources, key = { it.id }) { source ->
-                        SourceCard(source = source, onOpen = { onOpenSource(source.id) }, onDelete = { viewModel.deleteSource(source) })
+                        SourceCard(source = source, onOpen = { onOpenSource(source.id) }, onDelete = { pendingDelete = source })
                     }
                 }
             }
         }
+    }
+
+    pendingDelete?.let { source ->
+        ConfirmDialog(
+            title = "Delete this book?",
+            message = "“${source.title}” will be removed from your library. Words you tagged from it are kept.",
+            onConfirm = { viewModel.deleteSource(source); pendingDelete = null },
+            onDismiss = { pendingDelete = null },
+        )
     }
 }
 

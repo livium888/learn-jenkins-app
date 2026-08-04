@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.IntervalFormat
 import com.flashcardreader.app.ui.AppTopBar
+import com.flashcardreader.app.ui.ConfirmDialog
 import com.flashcardreader.app.ui.Spacing
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,6 +40,7 @@ import com.flashcardreader.app.ui.Spacing
 fun WordsScreen(viewModel: WordsViewModel, onBack: () -> Unit) {
     val terms by viewModel.terms.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<Term?>(null) }
+    var pendingDelete by remember { mutableStateOf<Term?>(null) }
 
     Scaffold(
         topBar = { AppTopBar(title = "My Words (${terms.size})", onBack = onBack) },
@@ -60,7 +62,7 @@ fun WordsScreen(viewModel: WordsViewModel, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(Spacing.tight + 4.dp),
             ) {
                 items(terms, key = { it.id }) { term ->
-                    WordCard(term = term, onEdit = { editing = term }, onDelete = { viewModel.delete(term) })
+                    WordCard(term = term, onEdit = { editing = term }, onDelete = { pendingDelete = term })
                 }
             }
         }
@@ -74,6 +76,15 @@ fun WordsScreen(viewModel: WordsViewModel, onBack: () -> Unit) {
                 viewModel.updateMeta(term, definition, selfNote, curious)
                 editing = null
             },
+        )
+    }
+
+    pendingDelete?.let { term ->
+        ConfirmDialog(
+            title = "Delete this word?",
+            message = "“${term.displayText}” and its review history will be permanently removed.",
+            onConfirm = { viewModel.delete(term); pendingDelete = null },
+            onDismiss = { pendingDelete = null },
         )
     }
 }

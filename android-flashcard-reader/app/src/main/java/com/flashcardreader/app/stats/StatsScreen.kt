@@ -3,6 +3,7 @@ package com.flashcardreader.app.stats
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -24,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,14 +39,48 @@ import com.flashcardreader.app.reminders.ReminderScheduler
 import com.flashcardreader.app.ui.AppTopBar
 import com.flashcardreader.app.ui.SectionCard
 import com.flashcardreader.app.ui.Spacing
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit, onOpenAiSettings: () -> Unit) {
     val stats by viewModel.stats.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val json = viewModel.exportJson()
+            withContext(Dispatchers.IO) {
+                context.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+            }
+            snackbar.showSnackbar("Backup saved")
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }
+            if (text != null) {
+                val n = viewModel.importJson(text)
+                snackbar.showSnackbar(if (n > 0) "Restored $n words" else "Nothing new to restore")
+            } else {
+                snackbar.showSnackbar("Couldn't read that file")
+            }
+        }
+    }
 
     Scaffold(
         topBar = { AppTopBar(title = "Progress", onBack = onBack) },
+        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -105,6 +143,32 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit, onOpenAiSettings:
             SectionCard {
                 SectionTitle("Reminders")
                 ReminderToggle()
+            }
+
+            SectionCard {
+                SectionTitle("Backup")
+                Text(
+                    "Back up my words",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { exportLauncher.launch("flashcards-backup.json") }
+                        .padding(vertical = 8.dp),
+                )
+                Text(
+                    "Restore from a backup",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }
+                        .padding(vertical = 8.dp),
+                )
+                Text(
+                    "Saves your words + review schedule to a file you can move to a new phone. " +
+                        "Restoring adds any words not already here. Books aren't included.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             AiSettingsRow(onOpenAiSettings)

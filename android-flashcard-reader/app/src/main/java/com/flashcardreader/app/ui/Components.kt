@@ -154,6 +154,23 @@ fun TonalButton(
     ) { Text(text, style = MaterialTheme.typography.labelLarge) }
 }
 
+/** A simple "Are you sure?" dialog for destructive actions. */
+@Composable
+fun ConfirmDialog(
+    title: String,
+    message: String,
+    confirmLabel: String = "Delete",
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AppDialog(onDismiss = onDismiss) {
+        Text(title, style = MaterialTheme.typography.titleLarge)
+        Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        PrimaryButton(text = confirmLabel, onClick = onConfirm)
+        OutlineButton(text = "Cancel", onClick = onDismiss)
+    }
+}
+
 /** Full-width outlined action for low-emphasis choices (Cancel, Skip). */
 @Composable
 fun OutlineButton(

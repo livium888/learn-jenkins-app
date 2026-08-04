@@ -35,7 +35,7 @@ data class Stats(
 )
 
 class StatsViewModel(
-    termRepository: TermRepository,
+    private val termRepository: TermRepository,
     private val calibration: CalibrationStore,
 ) : ViewModel() {
     val stats: StateFlow<Stats> = termRepository.observeAll()
@@ -44,6 +44,10 @@ class StatsViewModel(
             computeStats(terms).copy(calibration = snapshot.levels, calibrationNote = snapshot.note)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Stats())
+
+    suspend fun exportJson(): String = termRepository.exportJson()
+
+    suspend fun importJson(json: String): Int = termRepository.importJson(json)
 }
 
 private fun computeStats(terms: List<Term>): Stats {
