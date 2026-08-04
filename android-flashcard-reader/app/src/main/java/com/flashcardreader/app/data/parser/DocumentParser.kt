@@ -4,7 +4,15 @@ import android.content.Context
 import android.net.Uri
 import android.webkit.MimeTypeMap
 
-data class ParsedDocument(val title: String, val text: String)
+/** One table-of-contents entry: a chapter/section title anchored at a char offset in the book text. */
+data class Chapter(val title: String, val charOffset: Int, val level: Int = 0)
+
+data class ParsedDocument(
+    val title: String,
+    val text: String,
+    /** Chapter anchors for the table of contents + in-scroll chapter dividers. Empty if none recovered. */
+    val chapters: List<Chapter> = emptyList(),
+)
 
 /**
  * Parses a whole book file (opened via the Storage Access Framework, never

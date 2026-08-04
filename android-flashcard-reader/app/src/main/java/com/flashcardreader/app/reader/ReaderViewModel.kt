@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.Term
+import com.flashcardreader.app.data.parser.Chapter
 import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Fsrs
 import com.flashcardreader.app.data.fsrs.Rating
@@ -17,8 +18,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** One item in the scrolling reader; [startChar] is this slice's offset into the full book text. */
-data class TextChunk(val startChar: Int, val text: String) {
+/**
+ * One item in the scrolling reader; [startChar] is this slice's offset into the full book text.
+ * [chapterTitle] is set on the chunk that begins a chapter, so the reader can draw a divider there.
+ */
+data class TextChunk(val startChar: Int, val text: String, val chapterTitle: String? = null) {
     val endChar: Int get() = startChar + text.length
 }
 
@@ -27,6 +31,10 @@ data class ReaderUiState(
     val fullText: String = "",
     val terms: List<Term> = emptyList(),
     val chunks: List<TextChunk> = emptyList(),
+    /** Table of contents (title + char offset), empty if the book had none. */
+    val chapters: List<Chapter> = emptyList(),
+    /** Char offset the reader is currently at (top of the viewport), for the progress bar. */
+    val currentCharOffset: Int = 0,
     /** Which chunk to scroll to on open, to resume where the reader left off. */
     val initialChunkIndex: Int = 0,
     /** Due flashcards to answer before continuing. Shown as a blocking dialog. */
@@ -62,14 +70,17 @@ class ReaderViewModel(
             val text = source?.let { libraryRepository.readText(it) } ?: ""
             val terms = termRepository.allTerms()
             val typography = readerPrefs.typography.first()
-            val chunks = chunkText(text)
+            val chapters = source?.let { libraryRepository.readChapters(it) } ?: emptyList()
+            val chunks = chunkText(text, chapters)
             val startIndex = source?.let { src ->
                 chunks.indexOfFirst { it.endChar > src.lastPositionChar }.let { if (it < 0) 0 else it }
             } ?: 0
-            lastRecallOffset = chunks.getOrNull(startIndex)?.startChar ?: 0
+            val startOffset = chunks.getOrNull(startIndex)?.startChar ?: 0
+            lastRecallOffset = startOffset
             _uiState.update {
                 it.copy(
                     source = source, fullText = text, terms = terms, chunks = chunks,
+                    chapters = chapters, currentCharOffset = startOffset,
                     initialChunkIndex = startIndex, typography = typography, loading = false,
                 )
             }
@@ -88,7 +99,10 @@ class ReaderViewModel(
 
         if (firstVisible != lastPersistedChunk) {
             lastPersistedChunk = firstVisible
-            state.chunks.getOrNull(firstVisible)?.let { persistPosition(it.startChar) }
+            state.chunks.getOrNull(firstVisible)?.let {
+                persistPosition(it.startChar)
+                _uiState.update { s -> s.copy(currentCharOffset = it.startChar) }
+            }
         }
 
         if (state.pendingFlashcards.isNotEmpty() || state.pendingComprehension) return // one prompt at a time
@@ -178,10 +192,22 @@ class ReaderViewModel(
  * Splits the whole book into lazy-list-sized chunks. Splits on paragraph breaks where
  * they exist (PDFs), and caps chunk length (~1600 chars) at a word boundary otherwise
  * (EPUB/MOBI chapter text arrives as long blobs), so no single list item is huge.
+ *
+ * Chapter boundaries force a chunk break, and the chunk that begins a chapter is tagged with
+ * its title so the reader can render a divider there.
  */
-fun chunkText(full: String): List<TextChunk> {
+fun chunkText(full: String, chapters: List<Chapter> = emptyList()): List<TextChunk> {
     if (full.isEmpty()) return listOf(TextChunk(0, ""))
     val maxLen = 1600
+    val chapterAt = HashMap<Int, String>()
+    val boundaries = java.util.TreeSet<Int>()
+    for (c in chapters) {
+        if (c.charOffset in 0 until full.length) {
+            boundaries.add(c.charOffset)
+            // First title wins if two chapters share an offset.
+            chapterAt.putIfAbsent(c.charOffset, c.title)
+        }
+    }
     val chunks = ArrayList<TextChunk>()
     var i = 0
     val n = full.length
@@ -193,7 +219,11 @@ fun chunkText(full: String): List<TextChunk> {
             if (space > i) cut = space + 1
             end = cut
         }
-        chunks.add(TextChunk(i, full.substring(i, end)))
+        // Never let a chunk span into the next chapter: cut at the boundary so that chapter's
+        // text starts a fresh, tagged chunk.
+        val nextBoundary = boundaries.higher(i)
+        if (nextBoundary != null && nextBoundary < end) end = nextBoundary
+        chunks.add(TextChunk(i, full.substring(i, end), chapterAt[i]))
         i = end
     }
     return chunks

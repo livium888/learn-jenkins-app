@@ -89,13 +89,13 @@ class MobiParser : FileDocumentParser {
         }
 
         val html = textBytes.toByteArray().toString(charset)
-        val plainText = Jsoup.parse(html).let { doc ->
+        val (plainText, chapters) = Jsoup.parse(html).let { doc ->
             doc.select("script, style").remove()
-            blockText(doc) // preserve paragraph breaks, same as EPUB
+            blockTextWithChapters(doc) // paragraph breaks + heading-derived chapters
         }
 
         val title = record0Title(bytes).ifBlank { displayName.substringBeforeLast('.') }
-        return ParsedDocument(title = title, text = plainText)
+        return ParsedDocument(title = title, text = plainText, chapters = chapters)
     }
 
     /** The PDB header's 32-byte database name, null-padded - almost always the book title. */

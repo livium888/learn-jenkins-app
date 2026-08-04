@@ -5,6 +5,7 @@ import android.net.Uri
 import com.flashcardreader.app.data.db.dao.SourceDao
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.SourceType
+import com.flashcardreader.app.data.parser.Chapter
 import com.flashcardreader.app.data.parser.EpubParser
 import com.flashcardreader.app.data.parser.MobiParser
 import com.flashcardreader.app.data.parser.ParserRegistry
@@ -12,6 +13,8 @@ import com.flashcardreader.app.data.parser.PdfParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
@@ -41,14 +44,31 @@ class LibraryRepository(
         sourceDao.update(source.copy(lastPositionChar = charOffset))
     }
 
+    /** Table-of-contents anchors for a book, read from its sidecar file. Empty if none were recovered. */
+    suspend fun readChapters(source: Source): List<Chapter> = withContext(Dispatchers.IO) {
+        val file = tocFile(source)
+        if (!file.exists()) return@withContext emptyList()
+        runCatching {
+            val arr = JSONArray(file.readText())
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Chapter(o.getString("title"), o.getInt("offset"), o.optInt("level", 0))
+            }
+        }.getOrDefault(emptyList())
+    }
+
     suspend fun delete(source: Source) {
         File(source.textFilePath).delete()
         pageCacheFile(source).delete()
+        tocFile(source).delete()
         sourceDao.delete(source.id)
     }
 
     private fun pageCacheFile(source: Source): File =
         File("${source.textFilePath.removeSuffix(".txt")}.pagecache")
+
+    private fun tocFile(source: Source): File =
+        File("${source.textFilePath.removeSuffix(".txt")}.toc.json")
 
     /**
      * Re-paginating a whole book (walking every character, measuring line
@@ -96,10 +116,16 @@ class LibraryRepository(
             is PdfParser -> SourceType.PDF
             is MobiParser -> SourceType.MOBI
         }
-        persist(title = parsed.title, type = type, originUri = uri.toString(), text = parsed.text)
+        persist(title = parsed.title, type = type, originUri = uri.toString(), text = parsed.text, chapters = parsed.chapters)
     }
 
-    private suspend fun persist(title: String, type: SourceType, originUri: String, text: String): Source {
+    private suspend fun persist(
+        title: String,
+        type: SourceType,
+        originUri: String,
+        text: String,
+        chapters: List<Chapter>,
+    ): Source {
         val file = File(cacheDir, "${UUID.randomUUID()}.txt")
         file.writeText(text)
         val source = Source(
@@ -109,6 +135,13 @@ class LibraryRepository(
             textFilePath = file.absolutePath,
             addedAt = System.currentTimeMillis(),
         )
+        if (chapters.isNotEmpty()) {
+            val arr = JSONArray()
+            for (c in chapters) {
+                arr.put(JSONObject().put("title", c.title).put("offset", c.charOffset).put("level", c.level))
+            }
+            File("${file.absolutePath.removeSuffix(".txt")}.toc.json").writeText(arr.toString())
+        }
         val id = sourceDao.insert(source)
         return source.copy(id = id)
     }

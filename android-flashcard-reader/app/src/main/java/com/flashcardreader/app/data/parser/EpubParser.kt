@@ -39,6 +39,10 @@ class EpubParser : FileDocumentParser {
             val (title, spineHrefs) = parseOpf(opfBytes)
 
             val sb = StringBuilder()
+            // cleanHref (relative to opfDir) -> char offset where that file's text starts.
+            val spineOffsets = LinkedHashMap<String, Int>()
+            // cleanHref -> the file's first heading, a good fallback chapter title.
+            val headingByHref = HashMap<String, String>()
             for (href in spineHrefs) {
                 val cleanHref = href.substringBefore('#')
                 val path = if (opfDir.isEmpty()) cleanHref else "$opfDir/$cleanHref"
@@ -47,15 +51,102 @@ class EpubParser : FileDocumentParser {
                 doc.select("script, style").remove()
                 val chapterText = blockText(doc)
                 if (chapterText.isNotBlank()) {
+                    spineOffsets[cleanHref] = sb.length
+                    doc.body()?.selectFirst("h1, h2, h3, h4, h5, h6")?.text()
+                        ?.takeIf { it.isNotBlank() }?.let { headingByHref[cleanHref] = it }
                     sb.append(chapterText).append("\n\n")
                 }
             }
 
+            val chapters = buildChapters(entries, opfBytes, opfDir, spineOffsets, headingByHref)
+
             ParsedDocument(
                 title = title.ifBlank { displayName.substringBeforeLast('.') },
                 text = sb.toString().trim(),
+                chapters = chapters,
             )
         }
+
+    /**
+     * Recovers the table of contents, preferring the book's own navigation and falling back
+     * gracefully so a book without one still gets per-section anchors:
+     *  1. EPUB 3 nav document (`<nav epub:type="toc">`), else
+     *  2. EPUB 2 NCX (`toc.ncx`), else
+     *  3. one entry per spine file, titled by its first heading (or "Section N").
+     * Every entry is mapped to the char offset where that file's text begins.
+     */
+    private fun buildChapters(
+        entries: Map<String, ByteArray>,
+        opfBytes: ByteArray,
+        opfDir: String,
+        spineOffsets: Map<String, Int>,
+        headingByHref: Map<String, String>,
+    ): List<Chapter> {
+        if (spineOffsets.isEmpty()) return emptyList()
+
+        // Resolve a TOC href (possibly with an anchor and its own relative base) to a spine offset.
+        fun offsetFor(rawSrc: String): Int? {
+            val clean = rawSrc.substringBefore('#').substringAfterLast('/')
+            if (clean.isEmpty()) return null
+            spineOffsets.entries.firstOrNull { it.key.substringAfterLast('/') == clean }?.let { return it.value }
+            return null
+        }
+
+        val opf = Jsoup.parse(String(opfBytes, Charsets.UTF_8), "", Parser.xmlParser())
+
+        // 1) EPUB 3 nav document.
+        val navHref = opf.getElementsByTag("item").firstOrNull {
+            it.attr("properties").split(" ").contains("nav")
+        }?.attr("href")
+        if (!navHref.isNullOrBlank()) {
+            val navPath = if (opfDir.isEmpty()) navHref else "$opfDir/$navHref"
+            val navBytes = entries[navPath] ?: entries[decode(navPath)]
+            if (navBytes != null) {
+                val navDoc = Jsoup.parse(String(navBytes, Charsets.UTF_8))
+                val links = navDoc.select("nav a[href]").ifEmpty { navDoc.select("a[href]") }
+                val chapters = links.mapNotNull { a ->
+                    val off = offsetFor(a.attr("href")) ?: return@mapNotNull null
+                    a.text().takeIf { it.isNotBlank() }?.let { Chapter(it, off) }
+                }
+                dedup(chapters)?.let { return it }
+            }
+        }
+
+        // 2) EPUB 2 NCX.
+        val ncxHref = opf.getElementsByTag("item").firstOrNull {
+            it.attr("media-type") == "application/x-dtbncx+xml" || it.attr("href").endsWith(".ncx")
+        }?.attr("href")
+        if (!ncxHref.isNullOrBlank()) {
+            val ncxPath = if (opfDir.isEmpty()) ncxHref else "$opfDir/$ncxHref"
+            val ncxBytes = entries[ncxPath] ?: entries[decode(ncxPath)]
+            if (ncxBytes != null) {
+                val ncxDoc = Jsoup.parse(String(ncxBytes, Charsets.UTF_8), "", Parser.xmlParser())
+                val chapters = ncxDoc.getElementsByTag("navPoint").mapNotNull { np ->
+                    val label = np.selectFirst("navLabel > text")?.text()
+                        ?: np.selectFirst("text")?.text() ?: return@mapNotNull null
+                    val src = np.selectFirst("content")?.attr("src") ?: return@mapNotNull null
+                    val off = offsetFor(src) ?: return@mapNotNull null
+                    label.takeIf { it.isNotBlank() }?.let { Chapter(it, off) }
+                }
+                dedup(chapters)?.let { return it }
+            }
+        }
+
+        // 3) Fallback: one entry per spine file.
+        var n = 0
+        val chapters = spineOffsets.entries.map { (href, offset) ->
+            n++
+            Chapter(headingByHref[href] ?: "Section $n", offset)
+        }
+        return dedup(chapters) ?: emptyList()
+    }
+
+    /** Sort by position, drop duplicate offsets, and require at least 2 anchors to be worth a TOC. */
+    private fun dedup(chapters: List<Chapter>): List<Chapter>? {
+        val sorted = chapters.sortedBy { it.charOffset }
+            .distinctBy { it.charOffset }
+        return if (sorted.size >= 2) sorted else null
+    }
 
     private fun readZipEntries(context: Context, uri: Uri): Map<String, ByteArray> {
         val result = mutableMapOf<String, ByteArray>()
@@ -131,3 +222,31 @@ internal fun blockText(doc: org.jsoup.nodes.Document): String {
 }
 
 private val BLOCK_TAGS = setOf("p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote")
+private val HEADING_TAGS = setOf("h1", "h2", "h3")
+
+/**
+ * Like [blockText], but also records a [Chapter] at every top-level heading (h1-h3) with its
+ * offset into the returned text - used by the MOBI parser (which has no NCX/nav) to recover a
+ * table of contents from the book's own headings. Returns (text, chapters); chapters is empty
+ * if fewer than two headings are found (not enough for a useful TOC).
+ */
+internal fun blockTextWithChapters(doc: org.jsoup.nodes.Document): Pair<String, List<Chapter>> {
+    val blocks = doc.body()?.select("p, h1, h2, h3, h4, h5, h6, li, blockquote")
+    if (blocks.isNullOrEmpty()) return (doc.body()?.text().orEmpty()) to emptyList()
+    val sb = StringBuilder()
+    val chapters = ArrayList<Chapter>()
+    for (block in blocks) {
+        if (block.parents().any { it.tagName() in BLOCK_TAGS }) continue
+        val t = block.text().trim()
+        if (t.isEmpty()) continue
+        val tag = block.tagName().lowercase()
+        if (tag in HEADING_TAGS) {
+            chapters.add(Chapter(t, sb.length, level = tag.removePrefix("h").toIntOrNull() ?: 1))
+        }
+        sb.append(t).append("\n\n")
+    }
+    val text = sb.toString().trim()
+    if (text.isEmpty()) return (doc.body()?.text().orEmpty()) to emptyList()
+    val toc = chapters.distinctBy { it.charOffset }
+    return text to (if (toc.size >= 2) toc else emptyList())
+}
