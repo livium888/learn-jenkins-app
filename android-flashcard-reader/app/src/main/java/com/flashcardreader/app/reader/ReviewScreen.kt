@@ -43,6 +43,8 @@ fun ReviewScreen(viewModel: ReviewViewModel, onBack: () -> Unit) {
                     term = current,
                     contextSentence = state.contextSentence,
                     sourceLabel = state.contextSource,
+                    remaining = state.queue.size,
+                    onExit = onBack,
                     onAnswered = viewModel::answerCurrent,
                 )
             }

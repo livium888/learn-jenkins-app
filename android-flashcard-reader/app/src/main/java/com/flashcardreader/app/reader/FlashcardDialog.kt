@@ -7,8 +7,12 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -55,6 +59,8 @@ fun FlashcardDialog(
     term: Term,
     contextSentence: String = "",
     sourceLabel: String = "",
+    remaining: Int? = null,
+    onExit: (() -> Unit)? = null,
     onAnswered: (Rating, Confidence) -> Unit,
 ) {
     var revealed by remember(term.id) { mutableStateOf(false) }
@@ -75,8 +81,30 @@ fun FlashcardDialog(
     }
     val isCloze = cloze != null
 
-    AppDialog(onDismiss = { /* must answer to continue */ }, dismissible = false) {
-        Eyebrow(if (isCloze) "Fill the blank" else "Recall")
+    // In the reader a due word must be answered before continuing (onExit == null, non-dismissible).
+    // In the standalone Review, onExit is provided so back-press, tapping outside, and the ✕ all
+    // leave the queue - no trap.
+    AppDialog(onDismiss = onExit ?: {}, dismissible = onExit != null) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = (if (isCloze) "Fill the blank" else "Recall").uppercase(),
+                style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            if (remaining != null && remaining > 0) {
+                Text(
+                    "$remaining left",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (onExit != null) {
+                IconButton(onClick = onExit) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close review")
+                }
+            }
+        }
         Text(
             text = if (isCloze) "What word is missing?" else "What does “${term.displayText}” mean?",
             style = MaterialTheme.typography.titleLarge,
@@ -186,16 +214,6 @@ fun FlashcardDialog(
             }
         }
     }
-}
-
-/** Small uppercase label above the prompt. */
-@Composable
-private fun Eyebrow(text: String) {
-    Text(
-        text = text.uppercase(),
-        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
-        color = MaterialTheme.colorScheme.primary,
-    )
 }
 
 /** The book sentence rendered as a calm, indented quote. */
