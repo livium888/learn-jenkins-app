@@ -49,6 +49,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.data.parser.Chapter
+import com.flashcardreader.app.theme.FontLoader
 import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.theme.ReaderColors
@@ -96,6 +98,12 @@ fun ReaderScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+
+    // Resolve the reader font: system fonts are instant; accessibility fonts (OpenDyslexic,
+    // Atkinson) download on first use and fall back to sans-serif until ready.
+    val fontFamily by produceState(initialValue = typography.font.family, typography.font) {
+        value = FontLoader.familyFor(context, typography.font)
+    }
 
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
@@ -217,7 +225,7 @@ fun ReaderScreen(
         }
 
         val style = TextStyle(
-            fontFamily = typography.font.family,
+            fontFamily = fontFamily,
             fontSize = typography.fontSize,
             lineHeight = typography.lineHeight,
             letterSpacing = typography.letterSpacing,

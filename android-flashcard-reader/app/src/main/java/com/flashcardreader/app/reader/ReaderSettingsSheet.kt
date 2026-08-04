@@ -133,6 +133,10 @@ fun ReaderSettingsSheet(
             valueRange = 0f..1f,
         )
 
+        TextButton(onClick = { onChange(ReaderTypography()) }) {
+            Text("Reset to defaults")
+        }
+
         PrimaryButton(text = "Done", onClick = onDismiss)
     }
 }
