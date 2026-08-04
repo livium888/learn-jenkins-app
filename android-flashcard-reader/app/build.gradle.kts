@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+    id("androidx.baselineprofile")
 }
 
 // Optional release-signing config. Values come from a gitignored keystore.properties at the
@@ -129,6 +130,9 @@ dependencies {
 
     // Installs the bundled Baseline Profile so ART AOT-compiles hot paths (startup/scroll).
     implementation("androidx.profileinstaller:profileinstaller:1.3.1")
+
+    // The :baselineprofile module produces the profile that gets baked into the release build.
+    baselineProfile(project(":baselineprofile"))
 
     // Scheduled evening/morning review reminder notifications.
     implementation("androidx.work:work-runtime-ktx:2.9.1")

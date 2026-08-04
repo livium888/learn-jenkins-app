@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "FlashcardReader"
 include(":app")
+include(":baselineprofile")
