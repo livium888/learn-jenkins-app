@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,6 +90,26 @@ fun ReaderSettingsSheet(
             value = typography.marginScale,
             onValueChange = { onChange(typography.copy(marginScale = it)) },
             valueRange = 0.5f..2.5f,
+        )
+
+        val systemBrightness = typography.brightness < 0f
+        Label(if (systemBrightness) "Brightness: system" else "Brightness: ${(typography.brightness * 100).toInt()}%")
+        Slider(
+            value = if (systemBrightness) 0.5f else typography.brightness,
+            onValueChange = { onChange(typography.copy(brightness = it.coerceIn(0.05f, 1f))) },
+            valueRange = 0.05f..1f,
+        )
+        if (!systemBrightness) {
+            TextButton(onClick = { onChange(typography.copy(brightness = -1f)) }) {
+                Text("Use system brightness")
+            }
+        }
+
+        Label(if (typography.warmth <= 0f) "Night warmth: off" else "Night warmth: ${(typography.warmth * 100).toInt()}%")
+        Slider(
+            value = typography.warmth,
+            onValueChange = { onChange(typography.copy(warmth = it)) },
+            valueRange = 0f..1f,
         )
 
         PrimaryButton(text = "Done", onClick = onDismiss)

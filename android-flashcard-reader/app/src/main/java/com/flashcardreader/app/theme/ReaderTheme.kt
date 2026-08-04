@@ -31,6 +31,10 @@ data class ReaderTypography(
     val justify: Boolean = true,
     /** Horizontal page margin as a multiple of the 24dp base (0.5 = tight, 2.0 = wide). */
     val marginScale: Float = 1f,
+    /** Screen brightness override 0..1, or negative to follow the system brightness. */
+    val brightness: Float = -1f,
+    /** Night warmth: strength 0..1 of a warm overlay that cuts blue light (0 = off). */
+    val warmth: Float = 0f,
 ) {
     val fontSize get() = fontSizeSp.sp
     val lineHeight get() = (fontSizeSp * lineHeightMultiplier).sp

@@ -1,10 +1,13 @@
 package com.flashcardreader.app.reader
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +28,8 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +70,7 @@ import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.theme.ReaderColors
 import com.flashcardreader.app.theme.colorsFor
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.ceil
@@ -95,11 +102,52 @@ fun ReaderScreen(
     // Absolute char ranges (into the full book text) of the word being pressed / selected.
     var pressingRange by remember { mutableStateOf<IntRange?>(null) }
     var selectedRange by remember { mutableStateOf<IntRange?>(null) }
+    var autoScroll by remember { mutableStateOf(false) }
+    var autoScrollSpeed by remember { mutableStateOf(4f) }
+
+    // Keep the screen awake while reading; restore normal behaviour on leaving.
+    val activity = context as? Activity
+    DisposableEffect(activity) {
+        val window = activity?.window
+        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+
+    // Apply the chosen brightness override (negative = follow system); restore on leave.
+    DisposableEffect(activity, typography.brightness) {
+        val window = activity?.window
+        if (window != null) {
+            val lp = window.attributes
+            lp.screenBrightness =
+                if (typography.brightness in 0f..1f) typography.brightness
+                else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            window.attributes = lp
+        }
+        onDispose {
+            val w = activity?.window
+            if (w != null) {
+                val lp = w.attributes
+                lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                w.attributes = lp
+            }
+        }
+    }
 
     // One-time jump to the resume position once the book has loaded.
     LaunchedEffect(state.loading) {
         if (!state.loading && state.initialChunkIndex > 0) {
             listState.scrollToItem(state.initialChunkIndex)
+        }
+    }
+
+    // Hands-free auto-scroll: advance a few pixels each frame; stop at the end of the book.
+    LaunchedEffect(autoScroll, autoScrollSpeed) {
+        if (autoScroll) {
+            while (true) {
+                val consumed = listState.scrollBy(autoScrollSpeed)
+                if (consumed == 0f) { autoScroll = false; break }
+                delay(16)
+            }
         }
     }
 
@@ -154,6 +202,10 @@ fun ReaderScreen(
                     chapterTitle = currentChapterTitle(state.chapters, state.currentCharOffset),
                     background = colors.background,
                     onColor = colors.text,
+                    autoScroll = autoScroll,
+                    onToggleAutoScroll = { autoScroll = !autoScroll },
+                    speed = autoScrollSpeed,
+                    onSpeedChange = { autoScrollSpeed = it },
                     onScrub = { fraction -> jumpToOffset((fraction * state.fullText.length).toInt()) },
                 )
             }
@@ -183,30 +235,38 @@ fun ReaderScreen(
                 .collect { range -> range?.let { viewModel.onVisibleRange(it.first, it.second) } }
         }
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(colors.background),
-            contentPadding = PaddingValues(horizontal = typography.horizontalMarginDp.dp, vertical = 24.dp),
-        ) {
-            itemsIndexed(state.chunks, key = { _, chunk -> chunk.startChar }) { _, chunk ->
-                chunk.chapterTitle?.let { ChapterDivider(it, colors) }
-                ChunkText(
-                    chunk = chunk,
-                    style = style,
-                    accent = colors.accent,
-                    pressing = pressingRange,
-                    selected = selectedRange,
-                    onPress = { pressingRange = it },
-                    onClear = { selectedRange = null },
-                    onSelectWord = { word, range ->
-                        selectedRange = range
-                        val existing = state.terms.find { it.normalizedText == word.lowercase() }
-                        val sentence = ContextExtractor.sentenceAround(state.fullText, range.first, range.last + 1)
-                        flashcardPrefill = FlashcardPrefill(word, existing?.definition.orEmpty(), sentence)
-                    },
+        Box(Modifier.fillMaxSize().padding(padding).background(colors.background)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = typography.horizontalMarginDp.dp, vertical = 24.dp),
+            ) {
+                itemsIndexed(state.chunks, key = { _, chunk -> chunk.startChar }) { _, chunk ->
+                    chunk.chapterTitle?.let { ChapterDivider(it, colors) }
+                    ChunkText(
+                        chunk = chunk,
+                        style = style,
+                        accent = colors.accent,
+                        pressing = pressingRange,
+                        selected = selectedRange,
+                        onPress = { pressingRange = it },
+                        onClear = { selectedRange = null },
+                        onSelectWord = { word, range ->
+                            selectedRange = range
+                            val existing = state.terms.find { it.normalizedText == word.lowercase() }
+                            val sentence = ContextExtractor.sentenceAround(state.fullText, range.first, range.last + 1)
+                            flashcardPrefill = FlashcardPrefill(word, existing?.definition.orEmpty(), sentence)
+                        },
+                    )
+                }
+            }
+
+            // Night warmth: a non-interactive warm overlay that cuts blue light.
+            if (typography.warmth > 0f) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(Color(0xFFFF6A00).copy(alpha = (typography.warmth * 0.5f).coerceIn(0f, 0.5f))),
                 )
             }
         }
@@ -281,7 +341,10 @@ private fun ChapterDivider(title: String, colors: ReaderColors) {
     }
 }
 
-/** Bottom bar: current chapter, "page N of M · %", and a scrubber to jump anywhere in the book. */
+/**
+ * Bottom bar: an auto-scroll play/pause, the current chapter, "page N of M · %", and a scrubber
+ * to jump anywhere in the book. While auto-scrolling, a speed slider appears.
+ */
 @Composable
 private fun ReaderProgressBar(
     totalChars: Int,
@@ -289,6 +352,10 @@ private fun ReaderProgressBar(
     chapterTitle: String?,
     background: Color,
     onColor: Color,
+    autoScroll: Boolean,
+    onToggleAutoScroll: () -> Unit,
+    speed: Float,
+    onSpeedChange: (Float) -> Unit,
     onScrub: (Float) -> Unit,
 ) {
     val fraction = if (totalChars > 0) (currentChar.toFloat() / totalChars).coerceIn(0f, 1f) else 0f
@@ -299,8 +366,15 @@ private fun ReaderProgressBar(
     val muted = onColor.copy(alpha = 0.7f)
 
     Surface(color = background) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Column(Modifier.fillMaxWidth().padding(start = 8.dp, end = 16.dp, top = 2.dp, bottom = 4.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onToggleAutoScroll) {
+                    Icon(
+                        if (autoScroll) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (autoScroll) "Pause auto-scroll" else "Start auto-scroll",
+                        tint = if (autoScroll) MaterialTheme.colorScheme.primary else muted,
+                    )
+                }
                 Text(
                     chapterTitle.orEmpty(),
                     style = MaterialTheme.typography.labelMedium,
@@ -314,6 +388,17 @@ private fun ReaderProgressBar(
                     style = MaterialTheme.typography.labelMedium,
                     color = muted,
                 )
+            }
+            if (autoScroll) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Speed", style = MaterialTheme.typography.labelSmall, color = muted)
+                    Slider(
+                        value = speed,
+                        onValueChange = onSpeedChange,
+                        valueRange = 1f..14f,
+                        modifier = Modifier.weight(1f).padding(start = 12.dp),
+                    )
+                }
             }
             Slider(
                 value = shown,

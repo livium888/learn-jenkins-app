@@ -20,6 +20,8 @@ class ReaderPrefs(private val context: Context) {
         val PALETTE = stringPreferencesKey("palette")
         val JUSTIFY = booleanPreferencesKey("justify")
         val MARGIN = floatPreferencesKey("margin_scale")
+        val BRIGHTNESS = floatPreferencesKey("brightness")
+        val WARMTH = floatPreferencesKey("warmth")
     }
 
     val typography: Flow<ReaderTypography> = context.dataStore.data.map { prefs ->
@@ -30,6 +32,8 @@ class ReaderPrefs(private val context: Context) {
             palette = prefs[Keys.PALETTE]?.let { runCatching { ReaderPalette.valueOf(it) }.getOrNull() } ?: ReaderPalette.LIGHT,
             justify = prefs[Keys.JUSTIFY] ?: true,
             marginScale = prefs[Keys.MARGIN] ?: 1f,
+            brightness = prefs[Keys.BRIGHTNESS] ?: -1f,
+            warmth = prefs[Keys.WARMTH] ?: 0f,
         )
     }
 
@@ -41,6 +45,8 @@ class ReaderPrefs(private val context: Context) {
             prefs[Keys.PALETTE] = typography.palette.name
             prefs[Keys.JUSTIFY] = typography.justify
             prefs[Keys.MARGIN] = typography.marginScale
+            prefs[Keys.BRIGHTNESS] = typography.brightness
+            prefs[Keys.WARMTH] = typography.warmth
         }
     }
 }
