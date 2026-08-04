@@ -15,6 +15,8 @@ import kotlinx.coroutines.launch
 data class ReviewUiState(
     val queue: List<Term> = emptyList(),
     val contextSentence: String = "",
+    /** Title of the book the shown sentence was read in, for the "you read this in …" cue. */
+    val contextSource: String = "",
     val loading: Boolean = true,
 )
 
@@ -43,11 +45,12 @@ class ReviewViewModel(
     private fun loadContextForCurrent() {
         val term = _uiState.value.queue.firstOrNull()
         if (term == null) {
-            _uiState.update { it.copy(contextSentence = "") }
+            _uiState.update { it.copy(contextSentence = "", contextSource = "") }
             return
         }
         viewModelScope.launch {
-            val occurrence = termRepository.latestOccurrence(term.id)
+            // A *different* real sentence from your own reading each time (encoding variability).
+            val occurrence = termRepository.randomOccurrence(term.id)
             val source = occurrence?.let { libraryRepository.getSource(it.sourceId) }
             val text = source?.let { libraryRepository.readText(it) }
             val sentence = if (occurrence != null && text != null) {
@@ -55,7 +58,7 @@ class ReviewViewModel(
             } else {
                 ""
             }
-            _uiState.update { it.copy(contextSentence = sentence) }
+            _uiState.update { it.copy(contextSentence = sentence, contextSource = source?.title.orEmpty()) }
         }
     }
 

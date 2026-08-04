@@ -14,28 +14,51 @@ import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.OutlineButton
 import com.flashcardreader.app.ui.PrimaryButton
 
+private data class ReadingPrompt(val title: String, val question: String, val fieldLabel: String)
+
 /**
- * A periodic comprehension check: after a stretch of reading, "in a sentence, what was
- * this about?" Free recall of prose is the single strongest study technique in the
- * testing-effect literature - it trains comprehension, not just vocabulary. Not graded
- * (there's no answer key); the value is the act of retrieval. Skippable so it nudges
- * without derailing the read.
+ * Rotates among the three highest-leverage "think about what you just read" moves so the same
+ * gentle pause trains more than one skill:
+ *  - free recall of the prose (the strongest technique in the testing-effect literature),
+ *  - elaborative interrogation (connect it to what you already know),
+ *  - self-explanation (say why it's true / why it matters).
+ * Deliberately reading-first: it rides the existing after-a-stretch nudge rather than adding a
+ * separate drill, and it's always skippable.
  */
+private val READING_PROMPTS = listOf(
+    ReadingPrompt(
+        "Quick recall",
+        "Without scrolling back: in a sentence or two, what was this last stretch about?",
+        "Recall it in your own words",
+    ),
+    ReadingPrompt(
+        "Make a connection",
+        "How does what you just read connect to something you already know or have read before?",
+        "Draw the connection",
+    ),
+    ReadingPrompt(
+        "Explain it",
+        "In your own words, why might this be true — or why does it matter?",
+        "Explain your thinking",
+    ),
+)
+
 @Composable
 fun ComprehensionDialog(onDone: () -> Unit) {
-    var recall by remember { mutableStateOf("") }
+    var answer by remember { mutableStateOf("") }
+    val prompt = remember { READING_PROMPTS.random() }
 
     AppDialog(onDismiss = onDone) {
-        Text("Quick comprehension check", style = MaterialTheme.typography.titleLarge)
+        Text(prompt.title, style = MaterialTheme.typography.titleLarge)
         Text(
-            "Without scrolling back: in a sentence or two, what was this last stretch about?",
+            prompt.question,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         OutlinedTextField(
-            value = recall,
-            onValueChange = { recall = it },
-            label = { Text("Recall it in your own words") },
+            value = answer,
+            onValueChange = { answer = it },
+            label = { Text(prompt.fieldLabel) },
             shape = MaterialTheme.shapes.medium,
             modifier = Modifier.fillMaxWidth(),
         )

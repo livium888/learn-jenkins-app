@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.Term
+import com.flashcardreader.app.data.repository.CalibrationLevel
+import com.flashcardreader.app.data.repository.CalibrationStore
 import com.flashcardreader.app.data.repository.TermRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,11 +29,20 @@ data class Stats(
     val retentionPct: Int? = null,
     val curious: Int = 0,
     val hyperMiss: Int = 0,
+    /** Calibration: recall accuracy per confidence level (from CalibrationStore). */
+    val calibration: List<CalibrationLevel> = emptyList(),
+    val calibrationNote: String? = null,
 )
 
-class StatsViewModel(termRepository: TermRepository) : ViewModel() {
+class StatsViewModel(
+    termRepository: TermRepository,
+    private val calibration: CalibrationStore,
+) : ViewModel() {
     val stats: StateFlow<Stats> = termRepository.observeAll()
-        .map { computeStats(it) }
+        .map { terms ->
+            val snapshot = calibration.snapshot()
+            computeStats(terms).copy(calibration = snapshot.levels, calibrationNote = snapshot.note)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Stats())
 }
 

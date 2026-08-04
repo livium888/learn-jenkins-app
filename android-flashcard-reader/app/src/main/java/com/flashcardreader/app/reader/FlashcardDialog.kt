@@ -51,7 +51,12 @@ import kotlinx.coroutines.launch
  *  - Cloze recall: the book sentence with X blanked out - recall the missing word.
  */
 @Composable
-fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Rating, Confidence) -> Unit) {
+fun FlashcardDialog(
+    term: Term,
+    contextSentence: String = "",
+    sourceLabel: String = "",
+    onAnswered: (Rating, Confidence) -> Unit,
+) {
     var revealed by remember(term.id) { mutableStateOf(false) }
     var typed by remember(term.id) { mutableStateOf("") }
     var confidence by remember(term.id) { mutableStateOf(Confidence.UNSURE) }
@@ -81,6 +86,13 @@ fun FlashcardDialog(term: Term, contextSentence: String = "", onAnswered: (Ratin
         val sentence = if (isCloze) cloze else contextSentence.takeIf { it.isNotBlank() }
         if (sentence != null) {
             QuoteCard(sentence)
+            if (sourceLabel.isNotBlank()) {
+                Text(
+                    "You read this in “$sourceLabel”",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         if (!revealed) {

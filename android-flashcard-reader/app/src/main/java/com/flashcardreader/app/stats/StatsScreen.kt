@@ -84,6 +84,24 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit, onOpenAiSettings:
                 StatRow("⚠ High-confidence misses", stats.hyperMiss.toString())
             }
 
+            if (stats.calibration.any { it.total > 0 }) {
+                SectionCard {
+                    SectionTitle("Calibration")
+                    stats.calibration.forEach { level ->
+                        StatRow(
+                            "Felt ${level.label.lowercase()}",
+                            level.pct?.let { "$it% right · ${level.total}" } ?: "—",
+                        )
+                    }
+                    Text(
+                        stats.calibrationNote
+                            ?: "How often your confidence matched reality. Well-calibrated readers feel sure exactly when they are.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             SectionCard {
                 SectionTitle("Reminders")
                 ReminderToggle()

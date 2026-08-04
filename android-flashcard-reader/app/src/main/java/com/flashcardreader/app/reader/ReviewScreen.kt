@@ -39,7 +39,12 @@ fun ReviewScreen(viewModel: ReviewViewModel, onBack: () -> Unit) {
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(32.dp),
                 )
-                else -> FlashcardDialog(term = current, contextSentence = state.contextSentence, onAnswered = viewModel::answerCurrent)
+                else -> FlashcardDialog(
+                    term = current,
+                    contextSentence = state.contextSentence,
+                    sourceLabel = state.contextSource,
+                    onAnswered = viewModel::answerCurrent,
+                )
             }
         }
     }

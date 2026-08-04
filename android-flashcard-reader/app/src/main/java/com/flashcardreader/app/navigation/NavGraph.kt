@@ -60,7 +60,7 @@ fun AppNavGraph(app: FlashcardReaderApp) {
         }
         composable(ROUTE_STATS) {
             val viewModel: StatsViewModel = viewModel(
-                factory = viewModelFactory { initializer { StatsViewModel(app.termRepository) } },
+                factory = viewModelFactory { initializer { StatsViewModel(app.termRepository, app.calibration) } },
             )
             StatsScreen(
                 viewModel = viewModel,

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.Flow
 class TermRepository(
     private val termDao: TermDao,
     private val occurrenceDao: OccurrenceDao,
+    private val calibration: CalibrationStore,
     private val fsrs: Fsrs = Fsrs(),
 ) {
     fun observeAll(): Flow<List<Term>> = termDao.observeAll()
@@ -73,9 +74,17 @@ class TermRepository(
         }
         val updated = scheduled.copy(hyperMiss = hyperMiss)
         termDao.update(updated)
+        calibration.record(confidence, knew = rating == Rating.GOOD || rating == Rating.EASY)
         return updated
     }
 
     /** Most recent sighting of a term, used to pull up its context sentence outside of active reading. */
     suspend fun latestOccurrence(termId: Long): Occurrence? = occurrenceDao.forTerm(termId).firstOrNull()
+
+    /**
+     * A randomly chosen sighting of a term. Reviewing with a *different* real sentence from your
+     * own reading each time is a deliberate "encoding variability" boost - it trains you to
+     * recognise the word across contexts, not to parrot one memorised example.
+     */
+    suspend fun randomOccurrence(termId: Long): Occurrence? = occurrenceDao.forTerm(termId).randomOrNull()
 }
