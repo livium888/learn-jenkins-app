@@ -18,22 +18,27 @@ import java.net.URLEncoder
  */
 object DictionaryClient {
 
-    suspend fun lookup(query: String): String? = withContext(Dispatchers.IO) {
+    /** [lang] is a Wikimedia edition code ("en", "fr", "de", …); definitions come back in it. */
+    suspend fun lookup(query: String, lang: String = "en"): String? = withContext(Dispatchers.IO) {
         val q = query.trim()
         if (q.isEmpty()) return@withContext null
         // A capitalised or multi-word term is probably a name/place -> Wikipedia first.
         val looksLikeName = q.contains(' ') || (q.firstOrNull()?.isUpperCase() == true)
-        if (looksLikeName) wikipedia(q) ?: wiktionary(q) else wiktionary(q) ?: wikipedia(q)
+        if (looksLikeName) wikipedia(q, lang) ?: wiktionary(q, lang) else wiktionary(q, lang) ?: wikipedia(q, lang)
     }
 
-    private fun wiktionary(word: String): String? {
-        val json = httpGet("https://en.wiktionary.org/api/rest_v1/page/definition/${enc(word)}") ?: return null
+    private fun wiktionary(word: String, lang: String): String? {
+        val json = httpGet("https://$lang.wiktionary.org/api/rest_v1/page/definition/${enc(word)}") ?: return null
         return try {
-            val en = JSONObject(json).optJSONArray("en")
+            val root = JSONObject(json)
+            // The response is keyed by the word's language(s); the definition text itself is in the
+            // edition's language. Take the first non-blank definition from any section (not just "en").
+            val keys = root.keys()
             var result: String? = null
-            if (en != null) {
-                outer@ for (i in 0 until en.length()) {
-                    val defs = en.getJSONObject(i).optJSONArray("definitions") ?: continue
+            outer@ while (keys.hasNext()) {
+                val section = root.optJSONArray(keys.next()) ?: continue
+                for (i in 0 until section.length()) {
+                    val defs = section.getJSONObject(i).optJSONArray("definitions") ?: continue
                     for (j in 0 until defs.length()) {
                         val text = Jsoup.parse(defs.getJSONObject(j).optString("definition", "")).text().trim()
                         if (text.isNotBlank()) {
@@ -49,8 +54,8 @@ object DictionaryClient {
         }
     }
 
-    private fun wikipedia(title: String): String? {
-        val json = httpGet("https://en.wikipedia.org/api/rest_v1/page/summary/${enc(title)}") ?: return null
+    private fun wikipedia(title: String, lang: String): String? {
+        val json = httpGet("https://$lang.wikipedia.org/api/rest_v1/page/summary/${enc(title)}") ?: return null
         return try {
             JSONObject(json).optString("extract", "").takeIf { it.isNotBlank() }
         } catch (e: Exception) {

@@ -1,11 +1,14 @@
 package com.flashcardreader.app.reader
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -19,9 +22,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import com.flashcardreader.app.data.reference.DictionaryClient
+import com.flashcardreader.app.data.reference.DictionaryPrefs
 import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.OutlineButton
 import com.flashcardreader.app.ui.PrimaryButton
@@ -47,9 +52,13 @@ fun AddFlashcardDialog(
     var definition by remember { mutableStateOf(prefilledDefinition) }
     val isNew = prefilledDefinition.isBlank()
 
+    val context = LocalContext.current
+    val dictPrefs = remember { DictionaryPrefs(context) }
     val scope = rememberCoroutineScope()
     var looking by remember { mutableStateOf(false) }
     var lookupNote by remember { mutableStateOf<String?>(null) }
+    var lang by remember { mutableStateOf(dictPrefs.language) }
+    var langMenuOpen by remember { mutableStateOf(false) }
 
     AppDialog(onDismiss = onDismiss) {
         Text(if (isNew) "Add flashcard" else "Edit flashcard", style = MaterialTheme.typography.titleLarge)
@@ -103,7 +112,7 @@ fun AddFlashcardDialog(
                         looking = true
                         lookupNote = null
                         scope.launch {
-                            val found = DictionaryClient.lookup(term.trim())
+                            val found = DictionaryClient.lookup(term.trim(), lang)
                             if (found != null) {
                                 definition = if (found.length > 400) found.take(400).trimEnd() + "…" else found
                             } else {
@@ -114,6 +123,25 @@ fun AddFlashcardDialog(
                     },
                     enabled = term.isNotBlank(),
                 ) { Text("Look it up") }
+
+                // Language of the definition (which Wiktionary/Wikipedia edition to query).
+                Box {
+                    TextButton(onClick = { langMenuOpen = true }) {
+                        Text("${DictionaryPrefs.labelFor(lang)} ▾")
+                    }
+                    DropdownMenu(expanded = langMenuOpen, onDismissRequest = { langMenuOpen = false }) {
+                        DictionaryPrefs.LANGUAGES.forEach { (code, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    lang = code
+                                    dictPrefs.language = code
+                                    langMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
         lookupNote?.let {
