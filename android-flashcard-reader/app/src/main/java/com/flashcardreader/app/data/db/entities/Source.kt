@@ -3,7 +3,7 @@ package com.flashcardreader.app.data.db.entities
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-enum class SourceType { EPUB, PDF, MOBI }
+enum class SourceType { EPUB, PDF, MOBI, WEB }
 
 /**
  * An imported book file the user uploaded (PDF, EPUB, or MOBI - via the

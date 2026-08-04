@@ -34,6 +34,17 @@ class LibraryViewModel(private val repository: LibraryRepository) : ViewModel() 
         }
     }
 
+    fun importFromUrl(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isBlank()) return
+        _uiState.update { it.copy(importing = true, error = null) }
+        viewModelScope.launch {
+            runCatching { repository.importFromUrl(trimmed) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message ?: "Import failed") } }
+            _uiState.update { it.copy(importing = false) }
+        }
+    }
+
     fun deleteSource(source: Source) {
         viewModelScope.launch { repository.delete(source) }
     }

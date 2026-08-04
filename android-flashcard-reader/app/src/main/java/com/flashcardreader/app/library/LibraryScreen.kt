@@ -20,19 +20,23 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,8 +51,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.data.db.entities.Source
+import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.AppTopBar
 import com.flashcardreader.app.ui.ConfirmDialog
+import com.flashcardreader.app.ui.OutlineButton
+import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.ui.Spacing
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +73,7 @@ fun LibraryScreen(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingDelete by remember { mutableStateOf<Source?>(null) }
+    var showUrlDialog by remember { mutableStateOf(false) }
 
     val openDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -84,6 +92,7 @@ fun LibraryScreen(
     Scaffold(
         topBar = {
             AppTopBar(title = "My Library") {
+                IconButton(onClick = { showUrlDialog = true }) { Icon(Icons.Filled.Link, contentDescription = "Add from web") }
                 IconButton(onClick = onOpenGutenberg) { Icon(Icons.Filled.CloudDownload, contentDescription = "Free books") }
                 IconButton(onClick = onOpenStats) { Icon(Icons.Filled.Info, contentDescription = "Progress") }
                 IconButton(onClick = onOpenWords) { Icon(Icons.Filled.List, contentDescription = "My words") }
@@ -121,7 +130,7 @@ fun LibraryScreen(
             if (sources.isEmpty() && !uiState.importing) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        "No books yet.\nTap “Add book” to open a PDF, EPUB, or MOBI —\nor the ☁ icon above to browse thousands of free classics.",
+                        "No books yet.\nTap “Add book” to open a PDF, EPUB, or MOBI,\nthe 🔗 icon to save a web article, or the ☁ icon to browse free classics.",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -148,6 +157,46 @@ fun LibraryScreen(
             onConfirm = { viewModel.deleteSource(source); pendingDelete = null },
             onDismiss = { pendingDelete = null },
         )
+    }
+
+    if (showUrlDialog) {
+        AddFromWebDialog(
+            onDismiss = { showUrlDialog = false },
+            onAdd = { url ->
+                showUrlDialog = false
+                viewModel.importFromUrl(url)
+            },
+        )
+    }
+}
+
+/** Prompts for a web-page URL to fetch, extract into readable text, and save like a book. */
+@Composable
+private fun AddFromWebDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
+    var url by remember { mutableStateOf("") }
+    AppDialog(onDismiss = onDismiss) {
+        Text("Add from web", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Paste a link to an article. We’ll save a clean, readable copy you can read and tag " +
+                "offline — just like a book. Works best on normal article pages.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = url,
+            onValueChange = { url = it },
+            label = { Text("https://…") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        PrimaryButton(
+            text = "Save article",
+            enabled = url.isNotBlank(),
+            onClick = { if (url.isNotBlank()) onAdd(url.trim()) },
+        )
+        OutlineButton(text = "Cancel", onClick = onDismiss)
     }
 }
 

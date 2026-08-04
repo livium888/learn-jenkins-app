@@ -12,6 +12,7 @@ import com.flashcardreader.app.data.parser.EpubParser
 import com.flashcardreader.app.data.parser.MobiParser
 import com.flashcardreader.app.data.parser.ParserRegistry
 import com.flashcardreader.app.data.parser.PdfParser
+import com.flashcardreader.app.data.parser.WebArticleExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -194,6 +195,28 @@ class LibraryRepository(
             is MobiParser -> SourceType.MOBI
         }
         persist(title = parsed.title, type = type, originUri = uri.toString(), text = text, chapters = parsed.chapters)
+    }
+
+    /**
+     * Imports a web page by URL: fetches it, extracts the readable article ("reader mode"), and
+     * saves the text as an ordinary [Source] so it reads exactly like a book. The text is a local
+     * snapshot - it stays available offline even if the page later changes or disappears.
+     */
+    suspend fun importFromUrl(url: String): Source = withContext(Dispatchers.IO) {
+        val parsed = try {
+            WebArticleExtractor.fetch(url)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw IllegalStateException("Couldn't fetch that page - check the link and your connection.")
+        }
+        if (parsed.text.isBlank()) {
+            throw IllegalStateException(
+                "Couldn't find readable text on that page - it may need a login, or load its content with JavaScript.",
+            )
+        }
+        val text = if (parsed.text.length > MAX_TEXT_CHARS) parsed.text.substring(0, MAX_TEXT_CHARS) else parsed.text
+        persist(title = parsed.title, type = SourceType.WEB, originUri = url, text = text, chapters = parsed.chapters)
     }
 
     /** File size in bytes via the content provider, or -1 if it can't be determined. */
