@@ -1,0 +1,71 @@
+name: Scotland Trip App - Debug APK
+
+on:
+  push:
+    branches:
+      - claude/scotland-family-trip-app-txyajl
+    paths:
+      - "scotland-trip-app/**"
+      - ".github/workflows/scotland-trip-app.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build-debug-apk:
+    runs-on: ubuntu-latest
+    # Needed so the release step below can create/update a GitHub Release.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: scotland-trip-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: scotland-trip-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK
+        working-directory: scotland-trip-app/android
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scotland-trip-app-debug-apk
+          path: scotland-trip-app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # Direct, no-login .apk download link for sideloading (same pattern used by
+      # the Android Flashcard Reader workflow in this repo).
+      - name: Publish APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: scotland-trip-app-latest
+          name: Scotland Trip App - latest build
+          body: >-
+            Direct APK download for sideloading (debug build). Tap the app-debug.apk
+            asset below on your phone to install. Google Play Protect will warn about
+            an unrecognized developer (normal for a self-signed debug app) - choose
+            "More details" then "Install anyway".
+          prerelease: false
+          make_latest: false
+          files: scotland-trip-app/android/app/build/outputs/apk/debug/app-debug.apk
