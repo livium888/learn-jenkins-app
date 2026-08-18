@@ -61,10 +61,18 @@ fun FlashcardDialog(
     sourceLabel: String = "",
     remaining: Int? = null,
     onExit: (() -> Unit)? = null,
+    /**
+     * When true, a correctly *typed* cloze answer earns Focus Gate credit. The self-rating never
+     * earns anything - that is the whole point, since tapping "Good" four times in a second is
+     * exactly the cheat this closes.
+     */
+    earnMode: Boolean = false,
+    onEarned: (Term) -> Unit = {},
     onAnswered: (Rating, Confidence) -> Unit,
 ) {
     var revealed by remember(term.id) { mutableStateOf(false) }
     var typed by remember(term.id) { mutableStateOf("") }
+    var wasCorrect by remember(term.id) { mutableStateOf<Boolean?>(null) }
     var confidence by remember(term.id) { mutableStateOf(Confidence.UNSURE) }
 
     val context = LocalContext.current
@@ -124,15 +132,22 @@ fun FlashcardDialog(
         }
 
         if (!revealed) {
+            // A card can only earn when there is something objective to check against: a cloze has
+            // exactly one right answer, a free-form definition does not.
+            val earning = earnMode && isCloze
             Text(
-                if (isCloze) "Say the missing word, then reveal." else "Try to recall it before revealing.",
+                when {
+                    earning -> "Type the missing word to earn reading time."
+                    isCloze -> "Say the missing word, then reveal."
+                    else -> "Try to recall it before revealing."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
                 value = typed,
                 onValueChange = { typed = it },
-                label = { Text("Your answer (optional)") },
+                label = { Text(if (earning) "Your answer" else "Your answer (optional)") },
                 singleLine = isCloze,
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth(),
@@ -141,7 +156,18 @@ fun FlashcardDialog(
             Text("How sure are you?", style = MaterialTheme.typography.labelLarge)
             ConfidenceSegmented(selected = confidence, onSelect = { confidence = it })
 
-            PrimaryButton(text = "Reveal answer", onClick = { revealed = true })
+            PrimaryButton(
+                text = if (earning) "Check answer" else "Reveal answer",
+                enabled = !earning || typed.isNotBlank(),
+                onClick = {
+                    if (earning) {
+                        val correct = AnswerMatcher.isCorrect(typed, term.displayText)
+                        wasCorrect = correct
+                        if (correct) onEarned(term)
+                    }
+                    revealed = true
+                },
+            )
         } else {
             // --- Revealed answer ---
             if (typed.isNotBlank()) {
@@ -149,6 +175,14 @@ fun FlashcardDialog(
                     "You wrote: $typed",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            wasCorrect?.let { correct ->
+                Text(
+                    if (correct) "Correct - time banked." else "Not quite - no time banked this once.",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (correct) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

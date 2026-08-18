@@ -1,11 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- For evening/morning review-reminder notifications (Android 13+ runtime prompt). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- For the optional, bring-your-own-key AI tutor (Gemini) - used only on explicit request. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Focus Gate: see which app is in the foreground, and draw the gate over it. Both are
+         user-granted from Settings, and the whole feature is off until they are. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Lists launchable apps for the blocked-apps picker. The narrow MAIN/LAUNCHER form avoids
+         the sensitive QUERY_ALL_PACKAGES permission. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:name=".FlashcardReaderApp"
@@ -28,5 +48,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- targetSdk 34 requires a foreground service type; there is no "app blocking" type, so
+             specialUse is the honest fit and carries its subtype declaration. -->
+        <service
+            android:name=".focus.FocusGateService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="focus_gate_app_blocking" />
+        </service>
+
+        <receiver
+            android:name=".focus.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

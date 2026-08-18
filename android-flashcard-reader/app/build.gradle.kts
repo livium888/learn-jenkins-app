@@ -136,6 +136,13 @@ dependencies {
     // Encrypts the AI-tutor API key at rest (AES-256, key wrapped by the Android Keystore).
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // Explicit so the ViewTree owner extensions resolve: a ComposeView shown from a Service (the
+    // Focus Gate overlay) crashes on attach unless lifecycle, viewModelStore and savedStateRegistry
+    // owners are all set on it. These come in transitively today; pinning them makes that intent
+    // explicit rather than accidental.
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4")
+    implementation("androidx.savedstate:savedstate-ktx:1.2.1")
+
     // Installs the bundled Baseline Profile so ART AOT-compiles hot paths (startup/scroll).
     implementation("androidx.profileinstaller:profileinstaller:1.3.1")
 

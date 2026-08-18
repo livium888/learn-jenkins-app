@@ -11,6 +11,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.flashcardreader.app.FlashcardReaderApp
 import com.flashcardreader.app.ai.AiSettingsScreen
+import com.flashcardreader.app.focus.BlockedAppsScreen
+import com.flashcardreader.app.focus.FocusGateScreen
+import com.flashcardreader.app.focus.FocusGateViewModel
 import com.flashcardreader.app.gutenberg.GutenbergScreen
 import com.flashcardreader.app.gutenberg.GutenbergViewModel
 import com.flashcardreader.app.library.LibraryScreen
@@ -31,6 +34,8 @@ private const val ROUTE_STATS = "stats"
 private const val ROUTE_AI = "ai-settings"
 private const val ROUTE_GUTENBERG = "gutenberg"
 private const val ROUTE_READER = "reader/{sourceId}"
+private const val ROUTE_FOCUS = "focus-gate"
+private const val ROUTE_FOCUS_APPS = "focus-gate/apps"
 
 @Composable
 fun AppNavGraph(app: FlashcardReaderApp) {
@@ -58,7 +63,7 @@ fun AppNavGraph(app: FlashcardReaderApp) {
         }
         composable(ROUTE_REVIEW) {
             val viewModel: ReviewViewModel = viewModel(
-                factory = viewModelFactory { initializer { ReviewViewModel(app.termRepository, app.libraryRepository) } },
+                factory = viewModelFactory { initializer { ReviewViewModel(app.termRepository, app.libraryRepository, app.focusPrefs, app.creditBank) } },
             )
             ReviewScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
@@ -76,10 +81,31 @@ fun AppNavGraph(app: FlashcardReaderApp) {
                 viewModel = viewModel,
                 onBack = { navController.popBackStack() },
                 onOpenAiSettings = { navController.navigate(ROUTE_AI) },
+                onOpenFocusGate = { navController.navigate(ROUTE_FOCUS) },
             )
         }
         composable(ROUTE_AI) {
             AiSettingsScreen(onBack = { navController.popBackStack() })
+        }
+        composable(ROUTE_FOCUS) {
+            val viewModel: FocusGateViewModel = viewModel(
+                factory = viewModelFactory {
+                    initializer { FocusGateViewModel(app, app.focusPrefs, app.creditBank) }
+                },
+            )
+            FocusGateScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() },
+                onOpenApps = { navController.navigate(ROUTE_FOCUS_APPS) },
+            )
+        }
+        composable(ROUTE_FOCUS_APPS) {
+            val viewModel: FocusGateViewModel = viewModel(
+                factory = viewModelFactory {
+                    initializer { FocusGateViewModel(app, app.focusPrefs, app.creditBank) }
+                },
+            )
+            BlockedAppsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
         composable(
             ROUTE_READER,

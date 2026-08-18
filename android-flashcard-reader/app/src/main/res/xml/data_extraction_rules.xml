@@ -8,9 +8,13 @@
     <cloud-backup>
         <exclude domain="sharedpref" path="ai_prefs.xml" />
         <exclude domain="sharedpref" path="ai_prefs_secure.xml" />
+        <exclude domain="sharedpref" path="focus_credit.xml" />
+        <exclude domain="sharedpref" path="focus_prefs.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="ai_prefs.xml" />
         <exclude domain="sharedpref" path="ai_prefs_secure.xml" />
+        <exclude domain="sharedpref" path="focus_credit.xml" />
+        <exclude domain="sharedpref" path="focus_prefs.xml" />
     </device-transfer>
 </data-extraction-rules>

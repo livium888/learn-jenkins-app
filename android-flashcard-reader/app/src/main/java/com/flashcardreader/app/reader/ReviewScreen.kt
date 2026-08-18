@@ -45,6 +45,8 @@ fun ReviewScreen(viewModel: ReviewViewModel, onBack: () -> Unit) {
                     sourceLabel = state.contextSource,
                     remaining = state.queue.size,
                     onExit = onBack,
+                    earnMode = viewModel.focusEnabled,
+                    onEarned = viewModel::earnFromCard,
                     onAnswered = viewModel::answerCurrent,
                 )
             }

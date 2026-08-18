@@ -340,6 +340,11 @@ class ReaderViewModel(
         return text.substring(offset, end).replace(Regex("\\s+"), " ").trim().ifEmpty { "Bookmark" }
     }
 
+    /** Banks credit for a cloze card whose typed answer was actually correct (capped per day). */
+    fun earnFromCard(term: Term) {
+        viewModelScope.launch { creditBank.earnFromCard(term.id) }
+    }
+
     fun answerFlashcard(rating: Rating, confidence: Confidence) {
         onReadingInteraction()
         val match = _uiState.value.pendingFlashcards.firstOrNull() ?: return

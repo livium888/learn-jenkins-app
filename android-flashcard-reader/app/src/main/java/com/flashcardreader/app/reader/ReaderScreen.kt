@@ -341,7 +341,13 @@ fun ReaderScreen(
     }
 
     state.pendingFlashcards.firstOrNull()?.let { match ->
-        FlashcardDialog(term = match.term, contextSentence = match.contextSentence, onAnswered = viewModel::answerFlashcard)
+        FlashcardDialog(
+            term = match.term,
+            contextSentence = match.contextSentence,
+            earnMode = viewModel.focusEnabled,
+            onEarned = viewModel::earnFromCard,
+            onAnswered = viewModel::answerFlashcard,
+        )
     }
 
     if (state.pendingComprehension && state.pendingFlashcards.isEmpty()) {

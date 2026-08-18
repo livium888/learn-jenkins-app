@@ -45,7 +45,12 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit, onOpenAiSettings: () -> Unit) {
+fun StatsScreen(
+    viewModel: StatsViewModel,
+    onBack: () -> Unit,
+    onOpenAiSettings: () -> Unit,
+    onOpenFocusGate: () -> Unit,
+) {
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -171,7 +176,33 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit, onOpenAiSettings:
                 )
             }
 
+            SettingsRow("Focus Gate", onOpenFocusGate)
             AiSettingsRow(onOpenAiSettings)
+        }
+    }
+}
+
+/** A settings entry row, styled like the AI one. */
+@Composable
+private fun SettingsRow(label: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Icon(
+                Icons.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
