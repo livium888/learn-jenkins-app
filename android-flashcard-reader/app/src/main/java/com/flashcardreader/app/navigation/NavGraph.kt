@@ -89,7 +89,14 @@ fun AppNavGraph(app: FlashcardReaderApp) {
             val viewModel: ReaderViewModel = viewModel(
                 factory = viewModelFactory {
                     initializer {
-                        ReaderViewModel(sourceId, app.libraryRepository, app.termRepository, app.readerPrefs)
+                        ReaderViewModel(
+                            sourceId,
+                            app.libraryRepository,
+                            app.termRepository,
+                            app.readerPrefs,
+                            app.focusPrefs,
+                            app.creditBank,
+                        )
                     }
                 },
             )

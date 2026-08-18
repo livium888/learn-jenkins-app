@@ -1,6 +1,7 @@
 package com.flashcardreader.app.reader
 
 import android.app.Activity
+import android.os.SystemClock
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -67,7 +68,13 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.flashcardreader.app.data.parser.Chapter
 import com.flashcardreader.app.theme.FontLoader
 import com.flashcardreader.app.ui.AppDialog
@@ -244,6 +251,48 @@ fun ReaderScreen(
                 .collect { range -> range?.let { viewModel.onVisibleRange(it.first, it.second) } }
         }
 
+        // Focus Gate: measure genuine reading. repeatOnLifecycle(RESUMED) means switching apps or
+        // turning the screen off stops accrual for free, and cancelling clears part-read progress.
+        val lifecycleOwner = LocalLifecycleOwner.current
+        LaunchedEffect(listState) {
+            lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                var last = SystemClock.elapsedRealtime()
+                try {
+                    while (true) {
+                        delay(CREDIT_TICK_MS)
+                        val now = SystemClock.elapsedRealtime()
+                        // Clamp so a coroutine resuming late can't hand over a huge delta.
+                        val delta = (now - last).coerceAtMost(CREDIT_TICK_MS * 2)
+                        last = now
+                        // Read live state: `state` here would be captured stale for the whole loop.
+                        val live = viewModel.uiState.value
+                        // A Compose dialog keeps the reader RESUMED, so a prompt covering the text
+                        // must explicitly stop accrual - as must split-screen beside the blocked app.
+                        val covered = live.pendingFlashcards.isNotEmpty() ||
+                            live.pendingComprehension ||
+                            activity?.isInMultiWindowMode == true
+                        viewModel.onReadingTick(
+                            focusedChunk = if (covered) -1 else centreChunkIndex(listState),
+                            elapsedMs = delta,
+                        )
+                    }
+                } finally {
+                    viewModel.onReadingPaused()
+                }
+            }
+        }
+
+        // Only *human* touches count as being present. listState.interactionSource emits for real
+        // drags and presses but never for programmatic scrolling, which is exactly the distinction
+        // that stops a phone left face-up on auto-scroll from farming credit.
+        LaunchedEffect(listState) {
+            listState.interactionSource.interactions.collect { interaction ->
+                if (interaction is DragInteraction.Start || interaction is PressInteraction.Press) {
+                    viewModel.onReadingInteraction()
+                }
+            }
+        }
+
         Box(Modifier.fillMaxSize().padding(padding).background(colors.background)) {
             LazyColumn(
                 state = listState,
@@ -266,8 +315,8 @@ fun ReaderScreen(
                         accent = colors.accent,
                         selecting = pressingRange,
                         selected = selectedRange,
-                        onSelecting = { pressingRange = it },
-                        onClear = { selectedRange = null; pressingRange = null },
+                        onSelecting = { viewModel.onReadingInteraction(); pressingRange = it },
+                        onClear = { viewModel.onReadingInteraction(); selectedRange = null; pressingRange = null },
                         onSelectPhrase = { phrase, range ->
                             selectedRange = range
                             pressingRange = null
@@ -698,4 +747,24 @@ private fun clipboardText(context: Context): String {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     val clip: ClipData? = clipboard?.primaryClip
     return clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString().orEmpty()
+}
+
+/** How often the Focus Gate credit tracker samples the viewport. */
+private const val CREDIT_TICK_MS = 500L
+
+/**
+ * The chunk under the middle of the viewport, or -1 if there is none.
+ *
+ * Deliberately *one* chunk rather than everything visible: `visibleItemsInfo` counts an item as
+ * visible from a single pixel, so on a tall screen several chunks would each bank the same minute.
+ * Because the list renders exactly one item per chunk, LazyListItemInfo.index is the chunk index.
+ */
+private fun centreChunkIndex(listState: LazyListState): Int {
+    val info = listState.layoutInfo
+    val items = info.visibleItemsInfo
+    if (items.isEmpty()) return -1
+    val centre = (info.viewportStartOffset + info.viewportEndOffset) / 2
+    items.firstOrNull { centre >= it.offset && centre < it.offset + it.size }?.let { return it.index }
+    // Nothing spans the midpoint (very short chunks with gaps): fall back to the tallest one.
+    return items.maxByOrNull { it.size }?.index ?: -1
 }

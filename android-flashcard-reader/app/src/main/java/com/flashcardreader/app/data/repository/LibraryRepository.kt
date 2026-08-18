@@ -89,11 +89,37 @@ class LibraryRepository(
         file.writeText(arr.toString())
     }
 
+    /**
+     * Indices of chunks that have already earned Focus Gate reading credit for this book, so the
+     * same page can never be farmed twice. Stored in a sidecar beside the cached text, like the
+     * table of contents and bookmarks.
+     */
+    suspend fun readCreditedChunks(source: Source): Set<Int> = withContext(Dispatchers.IO) {
+        val file = creditedFile(source)
+        if (!file.exists()) return@withContext emptySet()
+        runCatching {
+            val arr = JSONArray(file.readText())
+            (0 until arr.length()).map { arr.getInt(it) }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
+    suspend fun saveCreditedChunks(source: Source, credited: Set<Int>) = withContext(Dispatchers.IO) {
+        val file = creditedFile(source)
+        if (credited.isEmpty()) {
+            file.delete()
+            return@withContext
+        }
+        val arr = JSONArray()
+        for (i in credited.sorted()) arr.put(i)
+        file.writeText(arr.toString())
+    }
+
     suspend fun delete(source: Source) {
         File(source.textFilePath).delete()
         pageCacheFile(source).delete()
         tocFile(source).delete()
         bookmarksFile(source).delete()
+        creditedFile(source).delete()
         sourceDao.delete(source.id)
     }
 
@@ -105,6 +131,9 @@ class LibraryRepository(
 
     private fun bookmarksFile(source: Source): File =
         File("${source.textFilePath.removeSuffix(".txt")}.bookmarks.json")
+
+    private fun creditedFile(source: Source): File =
+        File("${source.textFilePath.removeSuffix(".txt")}.credited.json")
 
     /**
      * Re-paginating a whole book (walking every character, measuring line

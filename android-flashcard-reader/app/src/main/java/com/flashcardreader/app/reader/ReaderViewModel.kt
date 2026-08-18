@@ -12,13 +12,17 @@ import com.flashcardreader.app.data.repository.Bookmark
 import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.repository.OccurrenceLog
 import com.flashcardreader.app.data.repository.TermRepository
+import com.flashcardreader.app.focus.CreditBank
+import com.flashcardreader.app.focus.FocusPrefs
 import com.flashcardreader.app.theme.ReaderPrefs
 import com.flashcardreader.app.theme.ReaderTypography
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,7 +31,13 @@ import kotlinx.coroutines.withContext
  * One item in the scrolling reader; [startChar] is this slice's offset into the full book text.
  * [chapterTitle] is set on the chunk that begins a chapter, so the reader can draw a divider there.
  */
-data class TextChunk(val startChar: Int, val text: String, val chapterTitle: String? = null) {
+data class TextChunk(
+    val startChar: Int,
+    val text: String,
+    val chapterTitle: String? = null,
+    /** Words in this chunk, used by the Focus Gate credit tracker to size a plausible dwell time. */
+    val wordCount: Int = 0,
+) {
     val endChar: Int get() = startChar + text.length
 }
 
@@ -56,6 +66,8 @@ data class ReaderUiState(
     val pendingComprehension: Boolean = false,
     val typography: ReaderTypography = ReaderTypography(),
     val loading: Boolean = true,
+    /** True when Focus Gate accrual has paused because nobody has touched the screen for a while. */
+    val creditIdle: Boolean = false,
 )
 
 class ReaderViewModel(
@@ -63,11 +75,26 @@ class ReaderViewModel(
     private val libraryRepository: LibraryRepository,
     private val termRepository: TermRepository,
     private val readerPrefs: ReaderPrefs,
+    private val focusPrefs: FocusPrefs,
+    private val creditBank: CreditBank,
     private val scanner: TermScanner = TermScanner(Fsrs()),
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState: StateFlow<ReaderUiState> = _uiState
+
+    /** Per-session anti-fake reading tracker; decides when a page has genuinely been read. */
+    private val creditTracker = ReadingCreditTracker(
+        capWpm = focusPrefs.maxWpm,
+        idleTimeoutMs = focusPrefs.idleTimeoutSeconds * 1000L,
+    )
+
+    /** Live Focus Gate balance, for the reader's earned-credit indicator. */
+    val creditBalance: StateFlow<Long> = creditBank.observeBalance()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    /** Whether Focus Gate is on at all - the indicator stays hidden when it isn't. */
+    val focusEnabled: Boolean get() = focusPrefs.enabled
 
     /** Chunks already scanned for due terms, so continued scrolling doesn't rescan them. */
     private val scannedChunks = mutableSetOf<Int>()
@@ -88,6 +115,8 @@ class ReaderViewModel(
             val typography = readerPrefs.typography.first()
             val chapters = source?.let { libraryRepository.readChapters(it) } ?: emptyList()
             val bookmarks = source?.let { libraryRepository.readBookmarks(it) } ?: emptyList()
+            // Pages already paid for in a previous session must never earn again.
+            source?.let { creditTracker.restore(libraryRepository.readCreditedChunks(it)) }
             // Chunking walks the whole book string; keep it off the main thread so a large
             // book doesn't hitch on open.
             val chunks = withContext(Dispatchers.Default) { chunkText(text, chapters) }
@@ -195,7 +224,48 @@ class ReaderViewModel(
     }
 
     fun dismissComprehension() {
+        onReadingInteraction()
         _uiState.update { it.copy(pendingComprehension = false) }
+    }
+
+    /**
+     * Reports a real human touch (drag, tap, long-press). Deliberately NOT called for programmatic
+     * scrolling: auto-scroll must not look like a person, or a phone left face-up would farm credit.
+     */
+    fun onReadingInteraction() {
+        creditTracker.noteInteraction(android.os.SystemClock.elapsedRealtime())
+    }
+
+    /** Clears part-read progress when the reader leaves the foreground. */
+    fun onReadingPaused() {
+        creditTracker.onPaused()
+    }
+
+    /**
+     * Drives the Focus Gate credit tracker once per tick. [focusedChunk] is the chunk centred in the
+     * viewport, or -1 when nothing should accrue (a prompt covers the text, or we're in split-screen).
+     */
+    fun onReadingTick(focusedChunk: Int, elapsedMs: Long) {
+        if (!focusPrefs.enabled) return
+        val state = _uiState.value
+        val words = state.chunks.getOrNull(focusedChunk)?.wordCount ?: 0
+        val result = creditTracker.tick(
+            nowMs = android.os.SystemClock.elapsedRealtime(),
+            focusedChunk = focusedChunk,
+            wordCount = words,
+            elapsedMs = elapsedMs,
+        )
+        if (result.idle != state.creditIdle) {
+            _uiState.update { it.copy(creditIdle = result.idle) }
+        }
+        if (result.creditedChunk != null) {
+            val source = state.source ?: return
+            val credited = creditTracker.creditedChunks.toSet()
+            viewModelScope.launch {
+                creditBank.earnFromReading(ReadingCreditTracker.contentValueSeconds(result.creditedWords))
+                libraryRepository.saveCreditedChunks(source, credited)
+            }
+        }
     }
 
     /**
@@ -271,6 +341,7 @@ class ReaderViewModel(
     }
 
     fun answerFlashcard(rating: Rating, confidence: Confidence) {
+        onReadingInteraction()
         val match = _uiState.value.pendingFlashcards.firstOrNull() ?: return
         viewModelScope.launch {
             val updated = termRepository.submitReview(match.term, rating, confidence)
@@ -339,8 +410,24 @@ fun chunkText(full: String, chapters: List<Chapter> = emptyList()): List<TextChu
         // text starts a fresh, tagged chunk.
         val nextBoundary = boundaries.higher(i)
         if (nextBoundary != null && nextBoundary < end) end = nextBoundary
-        chunks.add(TextChunk(i, full.substring(i, end), chapterAt[i]))
+        val body = full.substring(i, end)
+        chunks.add(TextChunk(i, body, chapterAt[i], countWords(body)))
         i = end
     }
     return chunks
+}
+
+/** Counts whitespace-delimited words. Cheap, and only ever run while chunking off the main thread. */
+private fun countWords(text: String): Int {
+    var count = 0
+    var inWord = false
+    for (c in text) {
+        if (c.isWhitespace()) {
+            inWord = false
+        } else if (!inWord) {
+            inWord = true
+            count++
+        }
+    }
+    return count
 }
