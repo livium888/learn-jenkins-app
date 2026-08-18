@@ -21,7 +21,7 @@ class ReadingCreditTrackerTest {
     /** Reads one page attentively, keeping a human present, and returns the ticks that paid out. */
     private fun readOnePage(
         t: ReadingCreditTracker,
-        chunk: Int,
+        chunk: Int = 0,
         words: Int = pageWords,
         totalMs: Long = 90_000L,
         startAt: Long = 1_000L,
