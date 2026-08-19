@@ -40,6 +40,15 @@ interface BookCatalog {
  */
 class CatalogAuthRequired(val catalogName: String) : IOException("$catalogName needs a login")
 
+/**
+ * Thrown when every known address for a catalogue failed. Carries what was tried and what came
+ * back, so the screen can show something actionable rather than a shrug.
+ */
+class CatalogUnavailable(
+    val catalogName: String,
+    val attempts: List<String>,
+) : IOException("$catalogName didn't respond:\n" + attempts.joinToString("\n"))
+
 /** Shared plain-HTTP helper - same no-dependency approach as the rest of the app's networking. */
 internal object BookHttp {
     private const val USER_AGENT = "FlashcardReader/1.0 (personal reading app)"

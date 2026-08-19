@@ -10,16 +10,27 @@ import org.jsoup.parser.Parser
  * Implementing it once is what makes new sources nearly free: anything with an OPDS URL can be
  * added without writing code, including a Calibre library you host yourself.
  *
- * The whole acquisition feed is fetched once per session and filtered locally rather than relying
- * on each server's search endpoint, whose support and parameter names vary. These catalogues are
- * small enough (Standard Ebooks is around a thousand books) that this is simpler and more reliable.
+ * A catalogue may publish its feed at more than one path, and sites reorganise them. So rather than
+ * betting on a single URL, [feedUrls] is tried in order and the first one that answers wins. If they
+ * all fail the error names each URL and what it returned, because "couldn't reach it" with no detail
+ * is impossible to act on - for the user or for whoever fixes it next.
  */
 class OpdsCatalog(
     override val displayName: String,
     override val blurb: String,
-    val feedUrl: String,
+    val feedUrls: List<String>,
     private val credentials: () -> Credentials? = { null },
 ) : BookCatalog {
+
+    constructor(
+        displayName: String,
+        blurb: String,
+        feedUrl: String,
+        credentials: () -> Credentials? = { null },
+    ) : this(displayName, blurb, listOf(feedUrl), credentials)
+
+    /** The first URL, used as the identity of this catalogue for stored logins. */
+    val feedUrl: String get() = feedUrls.first()
 
     private var cached: List<RemoteBook>? = null
 
@@ -32,11 +43,46 @@ class OpdsCatalog(
             .take(LIMIT)
     }
 
-    private suspend fun fetchFeed(): List<RemoteBook> =
-        parseFeed(BookHttp.getString(feedUrl, credentials(), displayName), feedUrl, displayName)
+    private suspend fun fetchFeed(): List<RemoteBook> {
+        val attempts = mutableListOf<String>()
+        var sawAuthFailure = false
+        for (url in feedUrls) {
+            try {
+                val books = parseFeed(BookHttp.getString(url, credentials(), displayName), url, displayName)
+                if (books.isNotEmpty()) return books
+                attempts += "$url returned no books"
+            } catch (e: CatalogAuthRequired) {
+                sawAuthFailure = true
+                attempts += "$url needs a login"
+            } catch (e: Exception) {
+                attempts += "$url: ${e.message.orEmpty().ifBlank { "failed" }}"
+            }
+        }
+        if (sawAuthFailure) throw CatalogAuthRequired(displayName)
+        throw CatalogUnavailable(displayName, attempts)
+    }
 
     companion object {
         private const val LIMIT = 60
+
+        /**
+         * Standard Ebooks publishes its catalogue as feeds, but the exact path has moved around and
+         * not every one is open to non-browser clients. Try the documented variants in turn rather
+         * than assuming; the books themselves are public domain and freely downloadable.
+         */
+        val STANDARD_EBOOKS_FEEDS = listOf(
+            "https://standardebooks.org/feeds/opds/all",
+            "https://standardebooks.org/feeds/atom/all",
+            "https://standardebooks.org/feeds/atom/new-releases",
+            "https://standardebooks.org/feeds/opds/new-releases",
+        )
+
+        fun standardEbooks(credentials: () -> Credentials? = { null }) = OpdsCatalog(
+            displayName = "Standard Ebooks",
+            blurb = "Beautifully typeset public-domain classics.",
+            feedUrls = STANDARD_EBOOKS_FEEDS,
+            credentials = credentials,
+        )
 
         /**
          * Pulls books out of an OPDS/Atom feed. Deliberately separate from the network call so the
@@ -50,11 +96,11 @@ class OpdsCatalog(
                 val title = entry.selectFirst("title")?.text()?.trim().orEmpty()
                 if (title.isEmpty()) return@mapNotNull null
 
-                // Only entries that actually offer an EPUB are usable by the reader.
-                val href = entry.select("link").firstOrNull { link ->
-                    link.attr("type").contains("epub", ignoreCase = true) &&
-                        link.attr("rel").contains("acquisition", ignoreCase = true)
-                }?.absUrl("href").orEmpty()
+                // Any link offering an EPUB will do. Plain Atom feeds don't always carry OPDS's
+                // "acquisition" rel, and insisting on it silently drops perfectly good books.
+                val href = entry.select("link")
+                    .firstOrNull { it.attr("type").contains("epub", ignoreCase = true) }
+                    ?.absUrl("href").orEmpty()
                 if (href.isEmpty()) return@mapNotNull null
 
                 RemoteBook(
@@ -67,24 +113,5 @@ class OpdsCatalog(
                 )
             }
         }
-
-        /**
-         * Public-domain classics, typeset properly by volunteers - real italics and dashes instead
-         * of OCR debris, and clean chapter markup, which also gives the reader better chapters and
-         * the flashcards better sentences.
-         */
-        const val STANDARD_EBOOKS_FEED = "https://standardebooks.org/feeds/opds/all"
-
-        /**
-         * Standard Ebooks gates its catalogue behind Patrons Circle membership - the books are
-         * free and public domain, but automated access to the catalogue is a supporter benefit.
-         * Sign in with your patron email as the username and no password.
-         */
-        fun standardEbooks(credentials: () -> Credentials? = { null }) = OpdsCatalog(
-            displayName = "Standard Ebooks",
-            blurb = "Beautifully typeset classics. Needs a free Patrons Circle sign-in.",
-            feedUrl = STANDARD_EBOOKS_FEED,
-            credentials = credentials,
-        )
     }
 }

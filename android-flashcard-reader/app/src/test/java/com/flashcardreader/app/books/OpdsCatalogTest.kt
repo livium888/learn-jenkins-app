@@ -60,6 +60,23 @@ class OpdsCatalogTest {
     }
 
     @Test
+    fun `plain atom entries without an acquisition rel still count`() {
+        // Not every feed uses OPDS's acquisition rel; insisting on it silently drops real books.
+        val atom = ""${'"'}
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry>
+                <title>Persuasion</title>
+                <author><name>Jane Austen</name></author>
+                <link type="application/epub+zip" href="https://example.org/persuasion.epub"/>
+              </entry>
+            </feed>
+        ""${'"'}.trimIndent()
+        val books = OpdsCatalog.parseFeed(atom, "https://example.org", "Test")
+        assertEquals(1, books.size)
+        assertEquals("Persuasion", books.first().title)
+    }
+
+    @Test
     fun `an empty or broken feed yields nothing rather than throwing`() {
         assertEquals(0, OpdsCatalog.parseFeed("", "https://example.org", "Test").size)
         assertEquals(0, OpdsCatalog.parseFeed("<html><body>oops</body></html>", "https://example.org", "Test").size)

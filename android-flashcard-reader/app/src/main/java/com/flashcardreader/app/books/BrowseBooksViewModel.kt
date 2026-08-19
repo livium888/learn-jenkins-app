@@ -7,6 +7,7 @@ import com.flashcardreader.app.data.books.BookCatalog
 import com.flashcardreader.app.data.books.BookSourcePrefs
 import com.flashcardreader.app.data.books.CatalogAuthRequired
 import com.flashcardreader.app.data.books.CatalogCredentials
+import com.flashcardreader.app.data.books.CatalogUnavailable
 import com.flashcardreader.app.data.books.Catalogs
 import com.flashcardreader.app.data.books.Credentials
 import com.flashcardreader.app.data.books.OpdsCatalog
@@ -91,6 +92,15 @@ class BrowseBooksViewModel(
                         loading = false,
                         needsLogin = true,
                         error = "${catalog.displayName} needs you to sign in.",
+                    )
+                }
+            } catch (e: CatalogUnavailable) {
+                // Name every address tried and what it said - otherwise this is unfixable guesswork.
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        error = "${catalog.displayName} didn't respond.\n" +
+                            e.attempts.joinToString("\n") { attempt -> "• $attempt" },
                     )
                 }
             } catch (e: Exception) {

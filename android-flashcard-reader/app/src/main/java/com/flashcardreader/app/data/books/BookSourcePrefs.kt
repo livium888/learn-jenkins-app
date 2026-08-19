@@ -49,7 +49,7 @@ object Catalogs {
         val logins = CatalogCredentials(context)
         return buildList {
             add(GutenbergCatalog())
-            add(OpdsCatalog.standardEbooks { logins.get(OpdsCatalog.STANDARD_EBOOKS_FEED) })
+            add(OpdsCatalog.standardEbooks { logins.get(OpdsCatalog.STANDARD_EBOOKS_FEEDS.first()) })
             add(WikisourceCatalog { dictionary.readingLanguage })
             custom.forEach { feed ->
                 add(OpdsCatalog(feed.name, "Your own catalogue", feed.url) { logins.get(feed.url) })
