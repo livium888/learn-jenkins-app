@@ -153,6 +153,10 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     testImplementation("junit:junit:4.13.2")
+    // Android ships org.json as a stub that throws on every call, so anything parsing JSON is
+    // untestable locally without a real implementation on the unit-test classpath. This is only
+    // ever used by tests - the app keeps using the platform's own org.json on the device.
+    testImplementation("org.json:json:20231013")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
