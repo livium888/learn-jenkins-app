@@ -42,7 +42,7 @@ class CreditBank(context: Context) {
         if (readingSeconds <= 0) return 0
         rollDayIfNeeded()
         val requested = (readingSeconds * settings.minutesPerReadingMinute).toLong()
-        return grant(requested, fromCard = false)
+        return grant(requested)
     }
 
     /**
@@ -58,7 +58,7 @@ class CreditBank(context: Context) {
         val cardEarned = prefs.getLong(KEY_CARD_EARNED_TODAY, 0L)
         val room = cardCapSeconds - cardEarned
         if (room <= 0) return 0
-        val granted = grant(minOf(settings.secondsPerCard.toLong(), room), fromCard = true)
+        val granted = grant(minOf(settings.secondsPerCard.toLong(), room))
         if (granted > 0) {
             prefs.edit()
                 .putStringSet(KEY_TERMS_TODAY, already + termId.toString())
@@ -85,7 +85,7 @@ class CreditBank(context: Context) {
     }
 
     /** Applies the overall daily ceiling and adds to the balance. Returns what was actually added. */
-    private fun grant(requested: Long, fromCard: Boolean): Long {
+    private fun grant(requested: Long): Long {
         val cap = settings.dailyTotalCapMinutes * 60L
         val earnedToday = prefs.getLong(KEY_EARNED_TODAY, 0L)
         val granted = minOf(requested, (cap - earnedToday).coerceAtLeast(0L))

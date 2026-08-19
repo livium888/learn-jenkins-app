@@ -7,7 +7,7 @@ import java.text.Normalizer
  *
  * This is what makes earned credit un-fakeable: credit comes from *producing* the missing word,
  * never from tapping a self-rating. Matching is deliberately forgiving of spelling (case, accents,
- * punctuation, one typo in longer words) and unforgiving of not knowing - a near-miss on the keys
+ * punctuation, one slip in longer words) and unforgiving of not knowing - a near-miss on the keys
  * still counts, a guess does not.
  */
 object AnswerMatcher {
@@ -18,9 +18,9 @@ object AnswerMatcher {
         val b = normalize(expected)
         if (a.isEmpty() || b.isEmpty()) return false
         if (a == b) return true
-        // Forgive a single slip (transposition/typo) once the word is long enough that a one-edit
-        // neighbour is unlikely to be a different real answer.
-        return b.length >= 5 && levenshtein(a, b) <= 1
+        // Forgive a single slip once the word is long enough that a one-edit neighbour is unlikely
+        // to be a different real answer ("cot"/"cat" must still fail).
+        return b.length >= 5 && editDistance(a, b) <= 1
     }
 
     /** Lowercase, strip accents and punctuation, collapse whitespace. Keeps multi-word names intact. */
@@ -34,22 +34,28 @@ object AnswerMatcher {
         return sb.toString().replace(Regex("\\s+"), " ").trim()
     }
 
-    private fun levenshtein(a: String, b: String): Int {
+    /**
+     * Damerau-Levenshtein (optimal string alignment): like Levenshtein, but swapping two adjacent
+     * letters costs one edit rather than two. That matters because transposition is the most common
+     * typing slip - "lantren" for "lantern" is a hit of the keys in the wrong order, not a failure
+     * to know the word.
+     */
+    private fun editDistance(a: String, b: String): Int {
         if (a == b) return 0
         if (a.isEmpty()) return b.length
         if (b.isEmpty()) return a.length
-        var prev = IntArray(b.length + 1) { it }
-        var curr = IntArray(b.length + 1)
+        val d = Array(a.length + 1) { IntArray(b.length + 1) }
+        for (i in 0..a.length) d[i][0] = i
+        for (j in 0..b.length) d[0][j] = j
         for (i in 1..a.length) {
-            curr[0] = i
             for (j in 1..b.length) {
                 val cost = if (a[i - 1] == b[j - 1]) 0 else 1
-                curr[j] = minOf(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost)
+                d[i][j] = minOf(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                    d[i][j] = minOf(d[i][j], d[i - 2][j - 2] + 1)
+                }
             }
-            val swap = prev
-            prev = curr
-            curr = swap
         }
-        return prev[b.length]
+        return d[a.length][b.length]
     }
 }
