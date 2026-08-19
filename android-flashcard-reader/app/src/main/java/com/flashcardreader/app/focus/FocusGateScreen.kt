@@ -1,6 +1,5 @@
 package com.flashcardreader.app.focus
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,7 +8,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -121,14 +124,29 @@ fun FocusGateScreen(
 
             SectionCard {
                 SectionTitle("Gated apps")
-                Text(
-                    if (state.blocked.isEmpty()) "None chosen yet" else "${state.blocked.size} chosen",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenApps() }
-                        .padding(vertical = 8.dp),
-                )
+                // A proper row with a chevron: as plain text this read as a label, not a button.
+                Surface(
+                    onClick = onOpenApps,
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            if (state.blocked.isEmpty()) "Choose apps" else "${state.blocked.size} chosen",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Icon(
+                            Icons.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 Text(
                     "Whole apps only. Blocking one website inside a browser would need much deeper " +
                         "access to what you're doing, which this app deliberately doesn't ask for.",

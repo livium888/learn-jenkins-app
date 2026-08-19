@@ -100,6 +100,7 @@ fun ReaderScreen(
     onBack: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val creditSeconds by viewModel.creditBalance.collectAsStateWithLifecycle()
     val typography = state.typography
     val colors = colorsFor(typography.palette)
     val context = LocalContext.current
@@ -219,6 +220,9 @@ fun ReaderScreen(
                     onColor = colors.text,
                     autoScroll = autoScroll,
                     onToggleAutoScroll = { autoScroll = !autoScroll },
+                    focusEnabled = viewModel.focusEnabled,
+                    creditSeconds = creditSeconds,
+                    creditIdle = state.creditIdle,
                     speed = autoScrollSpeed,
                     onSpeedChange = { autoScrollSpeed = it },
                     onScrub = { fraction -> jumpToOffset((fraction * state.fullText.length).toInt()) },
@@ -447,6 +451,9 @@ private fun ReaderProgressBar(
     onColor: Color,
     autoScroll: Boolean,
     onToggleAutoScroll: () -> Unit,
+    focusEnabled: Boolean,
+    creditSeconds: Long,
+    creditIdle: Boolean,
     speed: Float,
     onSpeedChange: (Float) -> Unit,
     onScrub: (Float) -> Unit,
@@ -476,6 +483,16 @@ private fun ReaderProgressBar(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (focusEnabled) {
+                    // The whole point of earning is being able to watch it happen, so the balance
+                    // lives here, where the reading is - not buried in a settings screen.
+                    Text(
+                        if (creditIdle) "paused · tap to resume" else "${creditSeconds / 60} min banked",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (creditIdle) muted else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(end = 10.dp),
+                    )
+                }
                 Text(
                     "Page ${page.coerceAtMost(totalPages)} of $totalPages · ${(shown * 100).roundToInt()}%",
                     style = MaterialTheme.typography.labelMedium,
