@@ -45,6 +45,16 @@ interface BookCatalog {
     suspend fun browse(topic: String): List<RemoteBook> = search(topic)
 
     /**
+     * Throws away anything held in memory so the next search asks the source again.
+     *
+     * Most sources query live and have nothing to forget, which is why this does nothing by
+     * default. A whole-catalogue source like OPDS is the exception: it reads the feed once and
+     * answers from memory, so without this it would keep showing the same titles all session no
+     * matter what the catalogue published in the meantime.
+     */
+    fun invalidate() {}
+
+    /**
      * Probes the source and reports exactly what happened. This exists because the build
      * environment cannot reach any of these hosts, so the only way to learn how they really behave
      * is to ask a real device and have it report back.

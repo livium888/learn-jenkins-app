@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.foundation.layout.FlowRow
@@ -81,6 +82,15 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             AppTopBar(title = "Free books", onBack = onBack) {
+                // Sources that hand over a whole catalogue at once are read once and then answered
+                // from memory, so new titles published since would never appear. This asks again.
+                IconButton(onClick = { viewModel.refresh() }, enabled = !state.refreshing) {
+                    if (state.refreshing) {
+                        CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    } else {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Check for new titles")
+                    }
+                }
                 IconButton(onClick = { viewModel.runDiagnostics() }) {
                     Icon(Icons.Filled.BugReport, contentDescription = "Test every source")
                 }

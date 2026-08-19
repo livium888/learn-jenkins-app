@@ -45,6 +45,8 @@ data class BrowseUiState(
     /** A probe report the user can send me, since I can't reach these hosts to test them. */
     val diagnostics: String? = null,
     val diagnosing: Boolean = false,
+    /** Set while re-reading a source, so the refresh reads as deliberate rather than as a stall. */
+    val refreshing: Boolean = false,
 )
 
 /**
@@ -105,12 +107,22 @@ class BrowseBooksViewModel(
         viewModelScope.launch {
             try {
                 val books = catalog.search(query)
-                _uiState.update { it.copy(loading = false, results = books, needsLogin = false) }
+                val wasRefreshing = _uiState.value.refreshing
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        results = books,
+                        needsLogin = false,
+                        message = if (wasRefreshing) refreshMessage(books.size) else it.message,
+                    )
+                }
                 syncShelves()
             } catch (e: CatalogAuthRequired) {
                 _uiState.update {
                     it.copy(
                         loading = false,
+                        refreshing = false,
                         needsLogin = true,
                         error = "${catalog.displayName} needs you to sign in.",
                     )
@@ -120,6 +132,7 @@ class BrowseBooksViewModel(
                 _uiState.update {
                     it.copy(
                         loading = false,
+                        refreshing = false,
                         error = "${catalog.displayName} didn't respond.\n" +
                             e.attempts.joinToString("\n") { attempt -> "• $attempt" },
                     )
@@ -128,6 +141,7 @@ class BrowseBooksViewModel(
                 _uiState.update {
                     it.copy(
                         loading = false,
+                        refreshing = false,
                         error = "Couldn't reach ${catalog.displayName}. ${e.message.orEmpty()}".trim(),
                     )
                 }
@@ -143,26 +157,54 @@ class BrowseBooksViewModel(
         viewModelScope.launch {
             try {
                 val books = catalog.browse(topic)
-                _uiState.update { it.copy(loading = false, results = books) }
+                val wasRefreshing = _uiState.value.refreshing
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        results = books,
+                        message = if (wasRefreshing) refreshMessage(books.size) else it.message,
+                    )
+                }
                 syncShelves()
             } catch (e: CatalogAuthRequired) {
                 _uiState.update {
-                    it.copy(loading = false, needsLogin = true, error = "${catalog.displayName} needs you to sign in.")
+                    it.copy(loading = false, refreshing = false, needsLogin = true, error = "${catalog.displayName} needs you to sign in.")
                 }
             } catch (e: CatalogUnavailable) {
                 _uiState.update {
                     it.copy(
                         loading = false,
+                        refreshing = false,
                         error = "${catalog.displayName} didn't respond.\n" +
                             e.attempts.joinToString("\n") { attempt -> "• $attempt" },
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(loading = false, error = e.message ?: "Couldn't reach ${catalog.displayName}.")
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        error = e.message ?: "Couldn't reach ${catalog.displayName}.",
+                    )
                 }
             }
         }
+    }
+
+    /**
+     * Asks the selected source again, instead of answering from what it said earlier.
+     *
+     * Only whole-catalogue sources hold anything to throw away, but the button is worth having on
+     * all of them: from the outside there is no way to tell which sources cache, and "did that
+     * actually re-check?" is not a question a reader should have to think about.
+     */
+    fun refresh() {
+        val catalog = catalogs.getOrNull(_uiState.value.selected) ?: return
+        catalog.invalidate()
+        _uiState.update { it.copy(refreshing = true) }
+        val topic = _uiState.value.activeTopic
+        if (topic != null) browseTopic(topic) else search(lastQuery)
     }
 
     /**
@@ -267,6 +309,10 @@ class BrowseBooksViewModel(
     fun consumeMessage() {
         _uiState.update { it.copy(message = null, error = null) }
     }
+
+    /** Says what the refresh found, so an unchanged list still confirms it really re-checked. */
+    private fun refreshMessage(count: Int): String =
+        if (count == 0) "Re-checked — still nothing here" else "Re-checked — $count titles"
 
     private companion object {
         /** Enough shelves to browse by, few enough to scan in one swipe. */
