@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
 import com.flashcardreader.app.ui.AppTopBar
 import androidx.compose.material3.Surface
 import com.flashcardreader.app.ui.PrimaryButton

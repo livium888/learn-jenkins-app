@@ -32,11 +32,27 @@ jobs:
 
       # The Focus Gate credit engine is pure Kotlin precisely so CI can prove the anti-fake
       # rules (a fling earns nothing, a page never pays twice, the rate cap holds).
+      #
+      # No --stacktrace. Compose code cannot be compiled anywhere but here, so this log is the
+      # only place a compile error is ever reported - and --stacktrace buried each one under a
+      # few hundred kilobytes of Gradle internals, which made reading the actual error harder
+      # than finding it by inspection. The summary step below pulls the errors back out.
       - name: Unit tests
-        run: ./gradlew testReleaseUnitTest --stacktrace
+        run: ./gradlew testReleaseUnitTest
 
       - name: Build release APK
-        run: ./gradlew assembleRelease --stacktrace
+        run: ./gradlew assembleRelease
+
+      # Repeats just the compiler errors and failed test names at the end of the log, where
+      # they can be read without scrolling past the whole build.
+      - name: Summarise failures
+        if: failure()
+        run: |
+          echo "::group::Kotlin compiler errors"
+          grep -hE "^e: |FAILED$|^\s+[a-zA-Z.]+Exception" "$GITHUB_WORKSPACE"/android-flashcard-reader/build/*.log 2>/dev/null || true
+          echo "::endgroup::"
+          echo "Re-running the failing task with errors only:"
+          ./gradlew assembleRelease 2>&1 | grep -E "^e: |^w: .*error|FAILED|Compilation error" | head -60 || true
 
       # Kept for anyone browsing the Actions run on desktop.
       - name: Upload release APK artifact
