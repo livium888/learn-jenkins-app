@@ -9,10 +9,12 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.flashcardreader.app.data.db.dao.OccurrenceDao
+import com.flashcardreader.app.data.db.dao.ReadingCheckDao
 import com.flashcardreader.app.data.db.dao.SourceDao
 import com.flashcardreader.app.data.db.dao.TermDao
 import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.Occurrence
+import com.flashcardreader.app.data.db.entities.ReadingCheckCard
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.SourceType
 import com.flashcardreader.app.data.db.entities.Term
@@ -32,8 +34,8 @@ class Converters {
 }
 
 @Database(
-    entities = [Term::class, Source::class, Occurrence::class],
-    version = 3,
+    entities = [Term::class, Source::class, Occurrence::class, ReadingCheckCard::class],
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -41,6 +43,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun termDao(): TermDao
     abstract fun sourceDao(): SourceDao
     abstract fun occurrenceDao(): OccurrenceDao
+    abstract fun readingCheckDao(): ReadingCheckDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -60,13 +63,45 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v4 adds comprehension questions written from passages you actually read. A new table
+         * rather than new columns: unlike the ALTER TABLE migrations above, this touches nothing
+         * that already exists, so an upgrade cannot disturb a single saved flashcard.
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS reading_checks (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        question TEXT NOT NULL,
+                        correctAnswer TEXT NOT NULL,
+                        distractors TEXT NOT NULL,
+                        evidence TEXT NOT NULL,
+                        sourceId INTEGER NOT NULL,
+                        charOffset INTEGER NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        difficulty REAL NOT NULL,
+                        stability REAL NOT NULL,
+                        due INTEGER,
+                        lastReviewedAt INTEGER,
+                        reps INTEGER NOT NULL,
+                        lapses INTEGER NOT NULL,
+                        state TEXT NOT NULL,
+                        hyperMiss INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "flashcard-reader.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
             }
     }
 }

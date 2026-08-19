@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.reminders.ReminderScheduler
 import com.flashcardreader.app.ui.AppTopBar
+import com.flashcardreader.app.data.repository.ReadingLog
 import com.flashcardreader.app.ui.SectionCard
 import com.flashcardreader.app.ui.Spacing
 import kotlinx.coroutines.Dispatchers
@@ -101,6 +102,11 @@ fun StatsScreen(
                 StatRow("Due now", stats.dueNow.toString())
                 StatRow("Reviewed today", stats.reviewedToday.toString())
             }
+
+            // The number the app has always known and never shown. Time with a book open is easy
+            // to accrue; time actually reading is not, and the anti-fake tracker can tell them
+            // apart. Seeing the gap is a cheaper corrective than any prompt.
+            ReadingAttentionCard()
 
             SectionCard {
                 SectionTitle("Maturity")
@@ -288,4 +294,45 @@ private fun StatRow(label: String, value: String) {
         Text(label, style = MaterialTheme.typography.bodyLarge)
         Text(value, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold))
     }
+}
+
+/**
+ * Time open versus time genuinely read, today.
+ *
+ * "Actually read" means it passed the anti-fake rules - centred in view, dwelt on long enough for
+ * its length, inside a global rate cap, with a real finger on the screen - so the comparison is
+ * honest rather than flattering. Stated without praise or scolding on purpose: the gap speaks for
+ * itself, and a number that lectures gets ignored.
+ */
+@Composable
+private fun ReadingAttentionCard() {
+    val context = LocalContext.current
+    // Read once per composition rather than observed: this is a daily tally, not a live readout.
+    val log = remember { ReadingLog(context) }
+    val open = log.openSecondsToday
+    val read = log.readSecondsToday
+    val pct = log.attentionPct
+
+    SectionCard {
+        SectionTitle("Attention")
+        StatRow("Book open today", formatReadingMinutes(open))
+        StatRow("Actually read", formatReadingMinutes(read))
+        StatRow("Of the time open", pct?.let { "$it%" } ?: "—")
+        Text(
+            if (pct == null) {
+                "Read for a minute or two and this fills in."
+            } else {
+                "“Actually read” counts only pages that stayed in view long enough to have been " +
+                    "read, with your hand on the screen. Scrolling past doesn't count."
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private fun formatReadingMinutes(seconds: Long): String = when {
+    seconds < 60 -> "under a minute"
+    seconds < 3_600 -> "${seconds / 60} min"
+    else -> "${seconds / 3_600} h ${(seconds % 3_600) / 60} min"
 }

@@ -1,0 +1,88 @@
+package com.flashcardreader.app.ai
+
+import org.json.JSONObject
+
+/**
+ * A comprehension question generated from a passage, with its answer key.
+ *
+ * [evidence] is quoted from the passage and is checked against it before this object is ever
+ * built - see [ReadingCheck.parse].
+ */
+data class ReadingCheck(
+    val question: String,
+    val correctAnswer: String,
+    /** Exactly three wrong options. */
+    val distractors: List<String>,
+    val evidence: String,
+) {
+    companion object {
+        const val REQUIRED_DISTRACTORS = 3
+
+        /**
+         * Parses the model's reply, returning null for anything that isn't a usable question.
+         *
+         * Validation here is not defensive politeness, it is the point. These questions become
+         * scheduled cards: a hallucinated one doesn't merely waste a moment, it teaches something
+         * false and then keeps coming back to teach it again. So a reply is rejected unless it
+         * parses, carries a real question, offers exactly three distinct wrong options, and cites
+         * evidence that genuinely appears in the passage. Anything short of that is dropped and the
+         * round is silently skipped - no question is always better than a wrong one.
+         */
+        fun parse(reply: String, passage: String): ReadingCheck? {
+            val json = extractJson(reply) ?: return null
+
+            val question = json.optString("question").trim()
+            val answer = json.optString("answer").trim()
+            val evidence = json.optString("evidence").trim()
+            if (question.isEmpty() || answer.isEmpty() || evidence.isEmpty()) return null
+
+            val wrongJson = json.optJSONArray("distractors") ?: return null
+            val wrong = (0 until wrongJson.length())
+                .map { wrongJson.optString(it).trim() }
+                .filter { it.isNotEmpty() }
+                .distinctBy { it.lowercase() }
+            if (wrong.size != REQUIRED_DISTRACTORS) return null
+
+            // A "wrong" option that is really the right one makes the question unanswerable.
+            if (wrong.any { it.equals(answer, ignoreCase = true) }) return null
+
+            // The citation has to be real. This is the single strongest guard against a question
+            // about something the passage never said.
+            if (!appearsIn(evidence, passage)) return null
+
+            return ReadingCheck(question, answer, wrong, evidence)
+        }
+
+        /**
+         * Finds the JSON object in a reply. Models like to wrap JSON in prose or a ```json fence,
+         * and rejecting an otherwise good answer over its packaging would be its own kind of bug.
+         */
+        private fun extractJson(reply: String): JSONObject? {
+            val start = reply.indexOf('{')
+            val end = reply.lastIndexOf('}')
+            if (start < 0 || end <= start) return null
+            return runCatching { JSONObject(reply.substring(start, end + 1)) }.getOrNull()
+        }
+
+        /**
+         * Whether the quoted evidence really occurs in the passage, comparing on collapsed
+         * whitespace so re-wrapped line breaks don't count as a mismatch. Curly and straight
+         * quotes are folded together for the same reason: models normalise punctuation silently.
+         */
+        fun appearsIn(evidence: String, passage: String): Boolean {
+            val needle = normalize(evidence)
+            if (needle.length < MIN_EVIDENCE_CHARS) return false
+            return normalize(passage).contains(needle)
+        }
+
+        private const val MIN_EVIDENCE_CHARS = 20
+
+        private fun normalize(text: String): String = text
+            .replace('‘', '\'').replace('’', '\'')
+            .replace('“', '"').replace('”', '"')
+            .replace('—', '-').replace('–', '-')
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .lowercase()
+    }
+}

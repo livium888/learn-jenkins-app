@@ -12,9 +12,15 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.flashcardreader.app.ai.AiPrefs
 import com.flashcardreader.app.theme.ReaderFont
 import com.flashcardreader.app.theme.ReaderPalette
 import com.flashcardreader.app.theme.ReaderTypography
@@ -27,9 +33,45 @@ fun ReaderSettingsSheet(
     typography: ReaderTypography,
     onChange: (ReaderTypography) -> Unit,
     onDismiss: () -> Unit,
+    /** This book, so its comprehension checks can be turned off without leaving the reader. */
+    sourceId: Long = 0,
 ) {
+    val context = LocalContext.current
+    val aiPrefs = remember { AiPrefs(context) }
+    // Only worth showing when checks are actually running; otherwise it is a switch about nothing.
+    val checksOn = aiPrefs.isReady && aiPrefs.readingChecks
+    var excluded by remember(sourceId) { mutableStateOf(sourceId in aiPrefs.excludedSources) }
+
     AppDialog(onDismiss = onDismiss) {
         Text("Reading settings", style = MaterialTheme.typography.titleLarge)
+
+        // The per-book opt-out lives here rather than in the library list, because this is where
+        // you are when you notice that *this* book is one you would rather not send anywhere.
+        if (checksOn && sourceId != 0L) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Ask me about this book", style = MaterialTheme.typography.bodyLarge)
+                Switch(
+                    checked = !excluded,
+                    onCheckedChange = {
+                        excluded = !it
+                        aiPrefs.setExcluded(sourceId, excluded)
+                    },
+                )
+            }
+            Text(
+                if (excluded) {
+                    "Off for this book — none of it is sent anywhere."
+                } else {
+                    "Pages you read in this book are sent to Gemini to write the questions."
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         Label("Font")
         Row(

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.repository.LibraryRepository
+import com.flashcardreader.app.data.repository.ReadingCheckRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +18,10 @@ data class LibraryUiState(
     val error: String? = null,
 )
 
-class LibraryViewModel(private val repository: LibraryRepository) : ViewModel() {
+class LibraryViewModel(
+    private val repository: LibraryRepository,
+    private val readingChecks: ReadingCheckRepository,
+) : ViewModel() {
 
     val sources: StateFlow<List<Source>> = repository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -46,7 +50,12 @@ class LibraryViewModel(private val repository: LibraryRepository) : ViewModel() 
     }
 
     fun deleteSource(source: Source) {
-        viewModelScope.launch { repository.delete(source) }
+        viewModelScope.launch {
+            // Questions belong to the book they were written from - keeping them after it's gone
+            // would mean being quizzed on a passage you can no longer look up.
+            runCatching { readingChecks.deleteForSource(source.id) }
+            repository.delete(source)
+        }
     }
 
     fun clearError() {

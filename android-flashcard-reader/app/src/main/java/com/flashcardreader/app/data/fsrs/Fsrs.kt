@@ -86,23 +86,44 @@ class Fsrs(private val requestRetention: Double = 0.9) {
      * card state, including the new due date.
      */
     fun review(term: Term, rating: Rating, now: Long): Term {
-        val elapsedDays = term.lastReviewedAt?.let { (now - it) / 86_400_000.0 } ?: 0.0
+        val next = review(term.fsrsState(), rating, now)
+        return term.copy(
+            difficulty = next.difficulty,
+            stability = next.stability,
+            due = next.due,
+            lastReviewedAt = next.lastReviewedAt,
+            reps = next.reps,
+            lapses = next.lapses,
+            state = next.state,
+        )
+    }
+
+    /**
+     * The scheduler itself, over nothing but scheduling state.
+     *
+     * Kept separate from [Term] because a vocabulary word is no longer the only thing worth
+     * spacing: a reading-comprehension question earns a place on the same schedule, and it must
+     * *not* be a Term - Terms exist to be matched against book text (see TermScanner), and a
+     * question about a passage must never be searched for inside prose.
+     */
+    fun review(card: FsrsState, rating: Rating, now: Long): FsrsState {
+        val elapsedDays = card.lastReviewedAt?.let { (now - it) / 86_400_000.0 } ?: 0.0
 
         val newDifficulty: Double
         val newStability: Double
         val newState: CardState
 
-        if (term.state == CardState.NEW) {
+        if (card.state == CardState.NEW) {
             newDifficulty = initDifficulty(rating)
             newStability = initStability(rating)
             newState = if (rating == Rating.AGAIN) CardState.LEARNING else CardState.REVIEW
         } else {
-            val r = retrievability(term.stability, elapsedDays)
-            newDifficulty = nextDifficulty(term.difficulty, rating)
+            val r = retrievability(card.stability, elapsedDays)
+            newDifficulty = nextDifficulty(card.difficulty, rating)
             newStability = if (rating == Rating.AGAIN) {
-                nextStabilityOnLapse(term.difficulty, term.stability, r)
+                nextStabilityOnLapse(card.difficulty, card.stability, r)
             } else {
-                nextStabilityOnRecall(term.difficulty, term.stability, r, rating)
+                nextStabilityOnRecall(card.difficulty, card.stability, r, rating)
             }
             newState = if (rating == Rating.AGAIN) CardState.RELEARNING else CardState.REVIEW
         }
@@ -110,17 +131,46 @@ class Fsrs(private val requestRetention: Double = 0.9) {
         val intervalDays = nextIntervalDays(newStability).coerceAtLeast(1.0 / 1440.0)
         val dueAt = now + (intervalDays * 86_400_000.0).toLong()
 
-        return term.copy(
+        return FsrsState(
             difficulty = newDifficulty,
             stability = newStability,
             due = dueAt,
             lastReviewedAt = now,
-            reps = term.reps + 1,
-            lapses = term.lapses + if (rating == Rating.AGAIN) 1 else 0,
+            reps = card.reps + 1,
+            lapses = card.lapses + if (rating == Rating.AGAIN) 1 else 0,
             state = newState,
         )
     }
 
     /** True if this term should interrupt reading and show its flashcard right now. */
     fun isDue(term: Term, now: Long): Boolean = term.due == null || term.due <= now
+
+    /** True if any scheduled card has come around again. Null due = never reviewed, so due now. */
+    fun isDue(due: Long?, now: Long): Boolean = due == null || due <= now
 }
+
+/**
+ * The scheduling fields FSRS actually operates on, shared by everything that can be spaced.
+ * Anything reviewable carries one of these; what the card *says* is the card's own business.
+ */
+data class FsrsState(
+    val difficulty: Double = 0.0,
+    val stability: Double = 0.0,
+    /** Epoch millis of the next scheduled review. Null = never reviewed yet (due immediately). */
+    val due: Long? = null,
+    val lastReviewedAt: Long? = null,
+    val reps: Int = 0,
+    val lapses: Int = 0,
+    val state: CardState = CardState.NEW,
+)
+
+/** A Term's scheduling state, so the shared scheduler can be handed one. */
+fun Term.fsrsState(): FsrsState = FsrsState(
+    difficulty = difficulty,
+    stability = stability,
+    due = due,
+    lastReviewedAt = lastReviewedAt,
+    reps = reps,
+    lapses = lapses,
+    state = state,
+)

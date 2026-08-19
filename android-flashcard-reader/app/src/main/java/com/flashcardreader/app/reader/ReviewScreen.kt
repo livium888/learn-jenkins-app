@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.flashcardreader.app.ai.ReadingCheck
 import com.flashcardreader.app.ui.AppTopBar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -26,11 +27,24 @@ fun ReviewScreen(viewModel: ReviewViewModel, onBack: () -> Unit) {
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
             val current = state.queue.firstOrNull()
+            val currentCheck = state.checkQueue.firstOrNull()
             when {
                 state.loading -> Text(
                     "Loading…",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // Words first, then the comprehension questions: a due word is a smaller ask, and
+                // clearing them keeps the longer questions from being the wall you hit on opening.
+                current == null && currentCheck != null -> ReadingCheckDialog(
+                    check = ReadingCheck(
+                        question = currentCheck.question,
+                        correctAnswer = currentCheck.correctAnswer,
+                        distractors = currentCheck.wrongOptions,
+                        evidence = currentCheck.evidence,
+                    ),
+                    onAnswered = viewModel::answerCurrentCheck,
+                    onSkip = viewModel::skipCurrentCheck,
                 )
                 current == null -> Text(
                     "Nothing due right now — nice work.",

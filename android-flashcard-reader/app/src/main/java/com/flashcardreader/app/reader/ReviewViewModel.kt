@@ -2,10 +2,12 @@ package com.flashcardreader.app.reader
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.flashcardreader.app.data.db.entities.ReadingCheckCard
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Rating
 import com.flashcardreader.app.data.repository.LibraryRepository
+import com.flashcardreader.app.data.repository.ReadingCheckRepository
 import com.flashcardreader.app.focus.CreditBank
 import com.flashcardreader.app.focus.FocusPrefs
 import com.flashcardreader.app.data.repository.TermRepository
@@ -16,6 +18,8 @@ import kotlinx.coroutines.launch
 
 data class ReviewUiState(
     val queue: List<Term> = emptyList(),
+    /** Due comprehension questions, asked after the vocabulary queue is clear. */
+    val checkQueue: List<ReadingCheckCard> = emptyList(),
     val contextSentence: String = "",
     /** Title of the book the shown sentence was read in, for the "you read this in …" cue. */
     val contextSource: String = "",
@@ -30,6 +34,7 @@ data class ReviewUiState(
 class ReviewViewModel(
     private val termRepository: TermRepository,
     private val libraryRepository: LibraryRepository,
+    private val readingCheckRepository: ReadingCheckRepository,
     private val focusPrefs: FocusPrefs,
     private val creditBank: CreditBank,
 ) : ViewModel() {
@@ -49,7 +54,8 @@ class ReviewViewModel(
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             val due = termRepository.allTerms().filter { termRepository.isDue(it, now) }
-            _uiState.update { it.copy(queue = due, loading = false) }
+            val checks = runCatching { readingCheckRepository.due(now) }.getOrDefault(emptyList())
+            _uiState.update { it.copy(queue = due, checkQueue = checks, loading = false) }
             loadContextForCurrent()
         }
     }
@@ -73,6 +79,22 @@ class ReviewViewModel(
             }
             _uiState.update { it.copy(contextSentence = sentence, contextSource = source?.title.orEmpty()) }
         }
+    }
+
+    /**
+     * Records an answer to a due comprehension question. The rating comes from the answer itself,
+     * never from a self-assessment - a tap on the right option out of four is evidence.
+     */
+    fun answerCurrentCheck(correct: Boolean) {
+        val card = _uiState.value.checkQueue.firstOrNull() ?: return
+        viewModelScope.launch {
+            readingCheckRepository.answer(card, correct)
+            _uiState.update { it.copy(checkQueue = it.checkQueue.drop(1)) }
+        }
+    }
+
+    fun skipCurrentCheck() {
+        _uiState.update { it.copy(checkQueue = it.checkQueue.drop(1)) }
     }
 
     fun answerCurrent(rating: Rating, confidence: Confidence) {

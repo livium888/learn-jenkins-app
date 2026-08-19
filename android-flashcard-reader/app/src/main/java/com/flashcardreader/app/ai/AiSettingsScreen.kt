@@ -12,6 +12,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,6 +40,8 @@ fun AiSettingsScreen(onBack: () -> Unit) {
     var language by remember { mutableStateOf(prefs.myLanguage) }
     var model by remember { mutableStateOf(prefs.model) }
     var template by remember { mutableStateOf(prefs.promptTemplate) }
+    var readingChecks by remember { mutableStateOf(prefs.readingChecks) }
+    var checkMinutes by remember { mutableStateOf(prefs.readingCheckMinutes) }
 
     Scaffold(
         topBar = { AppTopBar(title = "AI tutor", onBack = onBack) },
@@ -62,10 +65,62 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                 }
                 Text(
                     "When on, tapping “Check my guess” sends the word, its sentence, and your guess to " +
-                        "Google Gemini and shows its feedback. That is the only time anything leaves your device.",
+                        "Google Gemini and shows its feedback — only on that tap, and only those three things.",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            // A separate switch from the tutor above, and off by default, because it is a different
+            // bargain: the tutor sends a word when you ask it to, this sends pages of your book by
+            // itself. Handing over an API key must never be treated as consent to upload books.
+            SectionCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Ask me about what I read", style = MaterialTheme.typography.bodyLarge)
+                    Switch(
+                        checked = readingChecks,
+                        onCheckedChange = { readingChecks = it; prefs.readingChecks = it },
+                    )
+                }
+                Text(
+                    "Every few minutes of genuine reading, a question about the passage you just read — " +
+                        "four options, one tap. Get it wrong and it shows you the lines it came from. " +
+                        "Each question then joins your review schedule like any other card.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "This one is different from the tutor above, so read it before switching it on: it " +
+                        "sends the pages you have read to Google Gemini automatically, without asking each " +
+                        "time. Only pages you actually read are sent, never the whole book — but if a book " +
+                        "is private, leave this off or exclude that book from its page in your library. " +
+                        "Roughly a thousand words per question; an hour of reading is about fifteen.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (readingChecks) {
+                    Text(
+                        "Ask about every $checkMinutes minutes of reading",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Slider(
+                        value = checkMinutes.toFloat(),
+                        onValueChange = { checkMinutes = it.toInt() },
+                        onValueChangeFinished = { prefs.readingCheckMinutes = checkMinutes },
+                        valueRange = AiPrefs.MIN_MINUTES.toFloat()..AiPrefs.MAX_MINUTES.toFloat(),
+                        steps = AiPrefs.MAX_MINUTES - AiPrefs.MIN_MINUTES - 1,
+                    )
+                    Text(
+                        "Measured in reading actually done, not minutes on the clock — skim a chapter and " +
+                            "no question comes, because there is nothing you read to ask about.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             SectionCard {

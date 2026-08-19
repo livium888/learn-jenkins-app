@@ -1,7 +1,11 @@
 package com.flashcardreader.app.reader
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.flashcardreader.app.ai.AiPrefs
+import com.flashcardreader.app.ai.GeminiTutor
+import com.flashcardreader.app.ai.ReadingCheck
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.parser.Chapter
@@ -11,6 +15,8 @@ import com.flashcardreader.app.data.fsrs.Rating
 import com.flashcardreader.app.data.repository.Bookmark
 import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.repository.OccurrenceLog
+import com.flashcardreader.app.data.repository.ReadingCheckRepository
+import com.flashcardreader.app.data.repository.ReadingLog
 import com.flashcardreader.app.data.repository.TermRepository
 import com.flashcardreader.app.focus.CreditBank
 import com.flashcardreader.app.focus.FocusPrefs
@@ -68,17 +74,28 @@ data class ReaderUiState(
     val loading: Boolean = true,
     /** True when Focus Gate accrual has paused because nobody has touched the screen for a while. */
     val creditIdle: Boolean = false,
+    /** A question about the passage just read, waiting to be asked. Null when there isn't one. */
+    val pendingCheck: ReadingCheck? = null,
+    /** True once enough verified reading has happened for [pendingCheck] to be asked. */
+    val checkDue: Boolean = false,
+    /** Seconds of genuinely-read text banked this session, for the "open vs read" mirror. */
+    val verifiedSeconds: Long = 0,
 )
 
 class ReaderViewModel(
     private val sourceId: Long,
+    private val context: Context,
     private val libraryRepository: LibraryRepository,
     private val termRepository: TermRepository,
+    private val readingCheckRepository: ReadingCheckRepository,
+    private val readingLog: ReadingLog,
     private val readerPrefs: ReaderPrefs,
     private val focusPrefs: FocusPrefs,
     private val creditBank: CreditBank,
     private val scanner: TermScanner = TermScanner(Fsrs()),
 ) : ViewModel() {
+
+    private val aiPrefs = AiPrefs(context)
 
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState: StateFlow<ReaderUiState> = _uiState
@@ -103,6 +120,30 @@ class ReaderViewModel(
     /** Char offset of the last comprehension prompt, so we prompt again after a stretch of reading. */
     private var lastRecallOffset = 0
     private val recallThresholdChars = 12000
+
+    /**
+     * Words of *verified* reading banked since the last check, and the chunks they came from.
+     *
+     * Deliberately not a timer. "Every four minutes" on the clock is exactly what doom-scrolling
+     * defeats - leave the book open and the clock runs on regardless. Credited words only accrue
+     * when a page was genuinely read (see ReadingCreditTracker), so skimming a chapter in ten
+     * seconds earns no check at all, because nothing was read to ask about.
+     */
+    /** Open/read time waiting to be written out - see flushReadingLog. */
+    private var pendingOpenMs = 0L
+    private var pendingReadSeconds = 0L
+
+    private var wordsSinceCheck = 0
+    private val chunksSinceCheck = linkedSetOf<Int>()
+    private var checkJob: Job? = null
+    private var generatedForWindow = false
+
+    /** Row id of the question currently on offer, so answering it doesn't have to search for it. */
+    private var pendingCheckId: Long? = null
+
+    /** Words of genuine reading between checks, from the user's chosen interval. */
+    private val checkThresholdWords: Int
+        get() = aiPrefs.readingCheckMinutes * ReadingCreditTracker.TYPICAL_WPM
 
     /** The in-flight in-book search, cancelled when a new query arrives. */
     private var searchJob: Job? = null
@@ -236,9 +277,24 @@ class ReaderViewModel(
         creditTracker.noteInteraction(android.os.SystemClock.elapsedRealtime())
     }
 
-    /** Clears part-read progress when the reader leaves the foreground. */
+    /** Clears part-read progress when the reader leaves the foreground, and banks the tally. */
     fun onReadingPaused() {
         creditTracker.onPaused()
+        // Flush on the way out too: leaving after 40 seconds must still count those 40 seconds.
+        flushReadingLog()
+    }
+
+    /** Writes the accumulated open/read time out, keeping whatever didn't round to a whole second. */
+    private fun flushReadingLog() {
+        val openSeconds = pendingOpenMs / 1000
+        if (openSeconds > 0) {
+            readingLog.addOpen(openSeconds)
+            pendingOpenMs -= openSeconds * 1000
+        }
+        if (pendingReadSeconds > 0) {
+            readingLog.addRead(pendingReadSeconds)
+            pendingReadSeconds = 0
+        }
     }
 
     /**
@@ -246,26 +302,113 @@ class ReaderViewModel(
      * viewport, or -1 when nothing should accrue (a prompt covers the text, or we're in split-screen).
      */
     fun onReadingTick(focusedChunk: Int, elapsedMs: Long) {
-        if (!focusPrefs.enabled) return
         val state = _uiState.value
         val words = state.chunks.getOrNull(focusedChunk)?.wordCount ?: 0
+        // The tracker always runs. It used to be skipped unless Focus Gate was on, which made
+        // "what did you actually read" a Focus Gate internal - but it is the app's only honest
+        // measure of reading, and the reading checks and the stats mirror both need it whether or
+        // not anyone is blocking Instagram. Only the *banking* of credit is Focus Gate's business.
         val result = creditTracker.tick(
             nowMs = android.os.SystemClock.elapsedRealtime(),
             focusedChunk = focusedChunk,
             wordCount = words,
             elapsedMs = elapsedMs,
         )
+        // Every tick is time the book was open, whether or not it was time spent reading. That
+        // denominator is the whole point of the comparison. Accumulated in memory and flushed in
+        // batches: a preferences write every single second, forever, to count seconds would be a
+        // silly way to spend someone's battery, and integer-dividing each tick would quietly lose
+        // the remainder every time.
+        pendingOpenMs += elapsedMs
+        if (pendingOpenMs >= FLUSH_EVERY_MS) flushReadingLog()
         if (result.idle != state.creditIdle) {
             _uiState.update { it.copy(creditIdle = result.idle) }
         }
-        if (result.creditedChunk != null) {
-            val source = state.source ?: return
-            val credited = creditTracker.creditedChunks.toSet()
-            viewModelScope.launch {
-                creditBank.earnFromReading(ReadingCreditTracker.contentValueSeconds(result.creditedWords))
-                libraryRepository.saveCreditedChunks(source, credited)
-            }
+        val creditedChunk = result.creditedChunk ?: return
+        val source = state.source ?: return
+
+        val earnedSeconds = ReadingCreditTracker.contentValueSeconds(result.creditedWords)
+        pendingReadSeconds += earnedSeconds
+        _uiState.update { it.copy(verifiedSeconds = it.verifiedSeconds + earnedSeconds) }
+
+        val credited = creditTracker.creditedChunks.toSet()
+        viewModelScope.launch {
+            if (focusPrefs.enabled) creditBank.earnFromReading(earnedSeconds)
+            libraryRepository.saveCreditedChunks(source, credited)
         }
+
+        chunksSinceCheck.add(creditedChunk)
+        wordsSinceCheck += result.creditedWords
+        maybePrepareReadingCheck()
+        // Crossing the threshold has to be a state change, not something the UI asks about. A
+        // plain field would be read once when the question arrived - three quarters of the way
+        // through the stretch, so not yet due - and nothing would ever recompose to ask again.
+        if (!_uiState.value.checkDue && wordsSinceCheck >= checkThresholdWords) {
+            _uiState.update { it.copy(checkDue = true) }
+        }
+    }
+
+    /**
+     * Writes the next question in the background, before it is needed.
+     *
+     * Generation starts at [PREPARE_FRACTION] of the way to the threshold so the question is
+     * already in hand when the moment arrives: the dialog opens instantly instead of parking a
+     * spinner in the middle of someone's reading. If it isn't ready, or the model's answer failed
+     * validation, the round is simply skipped - reading is never blocked or interrupted by a wait.
+     */
+    private fun maybePrepareReadingCheck() {
+        if (generatedForWindow || checkJob?.isActive == true) return
+        if (!aiPrefs.checksReadyFor(sourceId)) return
+        if (wordsSinceCheck < checkThresholdWords * PREPARE_FRACTION) return
+
+        generatedForWindow = true
+        val passage = passageSinceLastCheck()
+        val offset = _uiState.value.chunks.getOrNull(chunksSinceCheck.firstOrNull() ?: 0)?.startChar ?: 0
+        checkJob = viewModelScope.launch {
+            val check = GeminiTutor.generateReadingCheck(context, passage).getOrNull() ?: return@launch
+            pendingCheckId = runCatching { readingCheckRepository.save(check, sourceId, offset) }.getOrNull()
+            _uiState.update { it.copy(pendingCheck = check) }
+        }
+    }
+
+    /**
+     * The text to ask about: exactly the chunks that were credited, in reading order.
+     *
+     * Only credited chunks are ever sent. Text that was scrolled past is not something the reader
+     * read, so asking about it would be unfair - and it keeps the upload to the smallest thing that
+     * answers the question, which matters when the upload is someone's book.
+     */
+    private fun passageSinceLastCheck(): String {
+        val chunks = _uiState.value.chunks
+        return chunksSinceCheck.sorted()
+            .mapNotNull { chunks.getOrNull(it)?.text }
+            .joinToString("\n\n")
+            .take(MAX_PASSAGE_CHARS)
+    }
+
+    /** Records the answer, reschedules the card, and opens the window for the next stretch. */
+    fun onReadingCheckAnswered(correct: Boolean) {
+        val cardId = pendingCheckId
+        clearCheckWindow()
+        if (cardId == null) return
+        viewModelScope.launch {
+            val card = readingCheckRepository.byId(cardId) ?: return@launch
+            readingCheckRepository.answer(card, correct)
+        }
+    }
+
+    /** Dismissed without answering. The question is kept - it is still due on the review screen. */
+    fun dismissReadingCheck() {
+        onReadingInteraction()
+        clearCheckWindow()
+    }
+
+    private fun clearCheckWindow() {
+        wordsSinceCheck = 0
+        chunksSinceCheck.clear()
+        generatedForWindow = false
+        pendingCheckId = null
+        _uiState.update { it.copy(pendingCheck = null, checkDue = false) }
     }
 
     /**
@@ -388,6 +531,15 @@ class ReaderViewModel(
  * Chapter boundaries force a chunk break, and the chunk that begins a chapter is tagged with
  * its title so the reader can render a divider there.
  */
+/** How much open/read time to accumulate before writing it to disk. */
+private const val FLUSH_EVERY_MS = 30_000L
+
+/** Start writing the question this far into the stretch, so it is ready before it is wanted. */
+private const val PREPARE_FRACTION = 0.75
+
+/** Bounds what leaves the device, and what the model has to hold in its head at once. */
+private const val MAX_PASSAGE_CHARS = 6_000
+
 fun chunkText(full: String, chapters: List<Chapter> = emptyList()): List<TextChunk> {
     if (full.isEmpty()) return listOf(TextChunk(0, ""))
     val maxLen = 1600
