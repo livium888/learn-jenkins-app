@@ -241,6 +241,30 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                             onDownload = { viewModel.download(book) },
                         )
                     }
+                    // Reaching this row is the signal to fetch the next page: scrolling to the
+                    // bottom is what "show me more" looks like, and asking for a tap there would
+                    // just be a button that says what the scroll already said.
+                    item(key = "more") {
+                        LaunchedEffect(state.results.size, state.endReached) {
+                            if (!state.endReached) viewModel.loadMore()
+                        }
+                        Box(
+                            Modifier.fillMaxWidth().padding(Spacing.gap),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            when {
+                                state.loadingMore -> CircularProgressIndicator(
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                                state.endReached -> Text(
+                                    "That's everything — ${state.results.size} titles",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

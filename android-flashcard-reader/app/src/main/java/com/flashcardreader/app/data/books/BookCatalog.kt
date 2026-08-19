@@ -52,6 +52,16 @@ interface BookCatalog {
      * answers from memory, so without this it would keep showing the same titles all session no
      * matter what the catalogue published in the meantime.
      */
+    /**
+     * The next slice of whatever the last [search] or [browse] returned, or empty when there is no
+     * more to give.
+     *
+     * Every source here answers in pages - Gutendex 32 at a time, Wikisource 30, an OPDS catalogue
+     * as much as we choose to show at once. Without this, the end of the first page was the end of
+     * the catalogue, and the other 69,000 books were unreachable from inside the app.
+     */
+    suspend fun more(): List<RemoteBook> = emptyList()
+
     fun invalidate() {}
 
     /**

@@ -50,6 +50,10 @@ data class BrowseUiState(
     val refreshing: Boolean = false,
     /** Ids that weren't in this source last time you looked - badged wherever they turn up. */
     val newIds: Set<String> = emptySet(),
+    /** Fetching the next page at the bottom of the list. */
+    val loadingMore: Boolean = false,
+    /** The source has nothing further to give, so stop asking. */
+    val endReached: Boolean = false,
 )
 
 /**
@@ -108,7 +112,7 @@ class BrowseBooksViewModel(
         lastQuery = query
         _uiState.update { it.copy(activeTopic = null) }
         val catalog = catalogs.getOrNull(_uiState.value.selected) ?: return
-        _uiState.update { it.copy(loading = true, error = null, needsLogin = false) }
+        _uiState.update { it.copy(loading = true, error = null, needsLogin = false, endReached = false) }
         viewModelScope.launch {
             try {
                 val books = catalog.search(query)
@@ -159,7 +163,9 @@ class BrowseBooksViewModel(
     fun browseTopic(topic: String) {
         val catalog = catalogs.getOrNull(_uiState.value.selected) ?: return
         lastQuery = ""
-        _uiState.update { it.copy(loading = true, error = null, needsLogin = false, activeTopic = topic) }
+        _uiState.update {
+            it.copy(loading = true, error = null, needsLogin = false, activeTopic = topic, endReached = false)
+        }
         viewModelScope.launch {
             try {
                 val books = catalog.browse(topic)
@@ -200,6 +206,42 @@ class BrowseBooksViewModel(
     }
 
     /**
+     * Fetches the next page when the list runs out under your thumb.
+     *
+     * Sources answer in pages - Gutendex 32 at a time, Wikisource 30, an OPDS catalogue as much as
+     * we choose to show - so without this the bottom of the first page was the bottom of the
+     * catalogue. Results are de-duplicated by id: a source that overlaps its pages would otherwise
+     * hand the list two rows with the same key, which Compose treats as a crash rather than a typo.
+     */
+    fun loadMore() {
+        val current = _uiState.value
+        if (current.loading || current.loadingMore || current.endReached) return
+        val catalog = catalogs.getOrNull(current.selected) ?: return
+        _uiState.update { it.copy(loadingMore = true) }
+        viewModelScope.launch {
+            try {
+                val next = catalog.more()
+                _uiState.update {
+                    it.copy(
+                        loadingMore = false,
+                        endReached = next.isEmpty(),
+                        results = (it.results + next).distinctBy { book -> book.id },
+                    )
+                }
+            } catch (e: Exception) {
+                // Stop asking, but say why - silently freezing at the bottom looks like the end.
+                _uiState.update {
+                    it.copy(
+                        loadingMore = false,
+                        endReached = true,
+                        error = "Couldn't load more. ${e.message.orEmpty()}".trim(),
+                    )
+                }
+            }
+        }
+    }
+
+    /**
      * Asks the selected source again, instead of answering from what it said earlier.
      *
      * Only whole-catalogue sources hold anything to throw away, but the button is worth having on
@@ -209,7 +251,7 @@ class BrowseBooksViewModel(
     fun refresh() {
         val catalog = catalogs.getOrNull(_uiState.value.selected) ?: return
         catalog.invalidate()
-        _uiState.update { it.copy(refreshing = true) }
+        _uiState.update { it.copy(refreshing = true, endReached = false) }
         val topic = _uiState.value.activeTopic
         if (topic != null) browseTopic(topic) else search(lastQuery)
     }

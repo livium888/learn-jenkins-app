@@ -30,11 +30,25 @@ class GutenbergCatalog : BookCatalog {
         CatalogDiagnosis(displayName, "https://gutendex.com/books", false, 0, e.message ?: "failed")
     }
 
+    /** Where the next page of the current search lives, or null at the end of the results. */
+    private var nextPage: String? = null
+
     override suspend fun browse(topic: String): List<RemoteBook> =
-        GutenbergClient.browseTopic(topic).map { it.toRemote() }
+        GutenbergClient.browseTopic(topic).take()
 
     override suspend fun search(query: String): List<RemoteBook> =
-        GutenbergClient.search(query).map { it.toRemote() }
+        GutenbergClient.search(query).take()
+
+    override suspend fun more(): List<RemoteBook> {
+        val url = nextPage ?: return emptyList()
+        return GutenbergClient.page(url).take()
+    }
+
+    /** Keeps the cursor and hands back the books, so no call site can forget to do both. */
+    private fun GutenbergClient.Page.take(): List<RemoteBook> {
+        nextPage = next
+        return books.map { it.toRemote() }
+    }
 
     private fun GutenbergBook.toRemote() = RemoteBook(
         id = "gutenberg:$id",

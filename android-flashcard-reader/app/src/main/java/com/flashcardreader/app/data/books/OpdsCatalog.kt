@@ -88,13 +88,25 @@ class OpdsCatalog(
         CatalogDiagnosis(displayName, feedUrls.first(), false, 0, e.message ?: e::class.java.simpleName)
     }
 
+    /**
+     * Everything the current search matched. The screen is handed one page at a time from here, so
+     * a catalogue of thousands stays scrollable rather than arriving all at once.
+     */
+    private var matched: List<RemoteBook> = emptyList()
+    private var served = 0
+
     override suspend fun search(query: String): List<RemoteBook> {
         val all = load()
         val q = query.trim()
-        if (q.isEmpty()) return all.take(LIMIT)
-        return all
-            .filter { it.title.contains(q, ignoreCase = true) || it.author.contains(q, ignoreCase = true) }
-            .take(LIMIT)
+        matched = if (q.isEmpty()) {
+            all
+        } else {
+            all.filter {
+                it.title.contains(q, ignoreCase = true) || it.author.contains(q, ignoreCase = true)
+            }
+        }
+        served = 0
+        return more()
     }
 
     override suspend fun browse(topic: String): List<RemoteBook> {
@@ -103,8 +115,17 @@ class OpdsCatalog(
         // A shelf name is a prefix of the catalogue's own wording as often as it is the whole of it
         // ("Adventure" vs "Adventure stories"), so match on containment rather than demanding the
         // subject be spelled exactly our way.
-        return all.filter { book -> book.subjects.any { it.contains(t, ignoreCase = true) } }
-            .take(LIMIT)
+        matched = all.filter { book -> book.subjects.any { it.contains(t, ignoreCase = true) } }
+        served = 0
+        return more()
+    }
+
+    /** The next page of the current match, straight from memory - the feed is already read. */
+    override suspend fun more(): List<RemoteBook> {
+        if (served >= matched.size) return emptyList()
+        val page = matched.subList(served, minOf(served + PAGE, matched.size)).toList()
+        served += page.size
+        return page
     }
 
     /** Fetches the whole catalogue once, then answers from memory. */
@@ -116,6 +137,8 @@ class OpdsCatalog(
     /** Drops the held catalogue so the next search re-reads the feed and picks up new titles. */
     override fun invalidate() {
         cached = null
+        matched = emptyList()
+        served = 0
         trace = emptyList()
         loadedFrom = emptyList()
     }
@@ -194,7 +217,8 @@ class OpdsCatalog(
     private fun short(url: String): String = url.substringAfter("://").take(70)
 
     companion object {
-        private const val LIMIT = 60
+        /** How many books reach the screen at once. The rest arrive as you scroll. */
+        private const val PAGE = 60
 
         /** Hard ceilings so a mis-linked feed can never turn into an unbounded crawl. */
         private const val MAX_REQUESTS = 24

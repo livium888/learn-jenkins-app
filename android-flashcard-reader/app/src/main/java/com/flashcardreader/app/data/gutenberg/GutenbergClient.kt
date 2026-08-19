@@ -30,10 +30,18 @@ object GutenbergClient {
     private const val ATTEMPTS = 2
     private const val RETRY_DELAY_MS = 700L
 
+    /**
+     * One page of results plus the address of the page after it.
+     *
+     * Gutendex answers 32 books at a time and names the next page in the response. Reading only the
+     * first page - and discarding that link - is what made a 70,000-book catalogue stop dead at 32.
+     */
+    data class Page(val books: List<GutenbergBook>, val next: String?)
+
     /** Search by title/author. A blank query returns the most-downloaded books (a "popular" list). */
-    suspend fun search(query: String): List<GutenbergBook> = withContext(Dispatchers.IO) {
+    suspend fun search(query: String): Page = withContext(Dispatchers.IO) {
         val url = if (query.isBlank()) BASE else "$BASE?search=${URLEncoder.encode(query, "UTF-8")}"
-        parseBooks(httpGetString(url))
+        parsePage(httpGetString(url))
     }
 
     /**
@@ -41,9 +49,12 @@ object GutenbergClient {
      * shelves, so "adventure" finds the adventure shelf instead of books with it in the title -
      * which is what makes browsing 70,000 books possible without knowing a title up front.
      */
-    suspend fun browseTopic(topic: String): List<GutenbergBook> = withContext(Dispatchers.IO) {
-        parseBooks(httpGetString("$BASE?topic=${URLEncoder.encode(topic, "UTF-8")}"))
+    suspend fun browseTopic(topic: String): Page = withContext(Dispatchers.IO) {
+        parsePage(httpGetString("$BASE?topic=${URLEncoder.encode(topic, "UTF-8")}"))
     }
+
+    /** Fetches a page named by a previous [Page.next]. */
+    suspend fun page(url: String): Page = withContext(Dispatchers.IO) { parsePage(httpGetString(url)) }
 
     /** Downloads the book's EPUB to [dest]; throws on a network or HTTP error. */
     suspend fun download(book: GutenbergBook, dest: File) = downloadUrl(book.epubUrl, dest)
@@ -105,8 +116,15 @@ object GutenbergClient {
         }
     }
 
-    private fun parseBooks(json: String): List<GutenbergBook> {
-        val results = JSONObject(json).optJSONArray("results") ?: return emptyList()
+    private fun parsePage(json: String): Page {
+        val root = JSONObject(json)
+        // Gutendex sends JSON null for the last page, which optString would hand back as "null".
+        val next = root.optString("next", "").takeIf { it.isNotBlank() && it != "null" }
+        return Page(parseBooks(root), next)
+    }
+
+    private fun parseBooks(root: JSONObject): List<GutenbergBook> {
+        val results = root.optJSONArray("results") ?: return emptyList()
         val books = ArrayList<GutenbergBook>()
         for (i in 0 until results.length()) {
             val o = results.getJSONObject(i)
