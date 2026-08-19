@@ -15,6 +15,7 @@ import com.flashcardreader.app.data.reference.DictionaryPrefs
 import com.flashcardreader.app.data.books.OpdsCatalog
 import com.flashcardreader.app.data.books.CustomFeed
 import com.flashcardreader.app.data.books.RemoteBook
+import com.flashcardreader.app.data.books.SeenBooks
 import com.flashcardreader.app.data.repository.LibraryRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +48,8 @@ data class BrowseUiState(
     val diagnosing: Boolean = false,
     /** Set while re-reading a source, so the refresh reads as deliberate rather than as a stall. */
     val refreshing: Boolean = false,
+    /** Ids that weren't in this source last time you looked - badged wherever they turn up. */
+    val newIds: Set<String> = emptySet(),
 )
 
 /**
@@ -61,6 +64,7 @@ class BrowseBooksViewModel(
 
     private val prefs = BookSourcePrefs(context)
     private val logins = CatalogCredentials(context)
+    private val seen = SeenBooks(context)
     private var catalogs: List<BookCatalog> = Catalogs.all(context)
     private var lastQuery = ""
 
@@ -94,6 +98,7 @@ class BrowseBooksViewModel(
                 results = emptyList(),
                 needsLogin = false,
                 activeTopic = null,
+                newIds = emptySet(),
             )
         }
         search(lastQuery)
@@ -118,6 +123,7 @@ class BrowseBooksViewModel(
                     )
                 }
                 syncShelves()
+                markArrivals(catalog)
             } catch (e: CatalogAuthRequired) {
                 _uiState.update {
                     it.copy(
@@ -167,6 +173,7 @@ class BrowseBooksViewModel(
                     )
                 }
                 syncShelves()
+                markArrivals(catalog)
             } catch (e: CatalogAuthRequired) {
                 _uiState.update {
                     it.copy(loading = false, refreshing = false, needsLogin = true, error = "${catalog.displayName} needs you to sign in.")
@@ -308,6 +315,21 @@ class BrowseBooksViewModel(
 
     fun consumeMessage() {
         _uiState.update { it.copy(message = null, error = null) }
+    }
+
+    /**
+     * Works out which books weren't here last time, and keeps them badged for the visit.
+     *
+     * The comparison is against the source's whole catalogue rather than what's on screen: a book
+     * that arrives while you happen to be searching for something else would otherwise be recorded
+     * as seen without ever having been shown. Results accumulate across a refresh, so a badge
+     * earned earlier in the visit doesn't vanish the moment you re-check.
+     */
+    private suspend fun markArrivals(catalog: BookCatalog) {
+        val all = runCatching { catalog.wholeCatalogue() }.getOrNull() ?: return
+        val arrivals = seen.newSince(catalog.displayName, all.map { it.id })
+        if (arrivals.isEmpty()) return
+        _uiState.update { it.copy(newIds = it.newIds + arrivals) }
     }
 
     /** Says what the refresh found, so an unchanged list still confirms it really re-checked. */

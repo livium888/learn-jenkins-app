@@ -110,6 +110,9 @@ class OpdsCatalog(
     /** Fetches the whole catalogue once, then answers from memory. */
     private suspend fun load(): List<RemoteBook> = cached ?: crawl().also { cached = it }
 
+    /** An OPDS feed is a complete catalogue, so it can be asked what it holds. */
+    override suspend fun wholeCatalogue(): List<RemoteBook> = load()
+
     /** Drops the held catalogue so the next search re-reads the feed and picks up new titles. */
     override fun invalidate() {
         cached = null

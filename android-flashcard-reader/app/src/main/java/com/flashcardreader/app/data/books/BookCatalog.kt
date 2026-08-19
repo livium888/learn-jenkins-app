@@ -55,6 +55,16 @@ interface BookCatalog {
     fun invalidate() {}
 
     /**
+     * Everything this source holds, or null if it can't say.
+     *
+     * Only a source that hands over a complete catalogue can answer this. A live-query source like
+     * Gutenberg or Wikisource has no "contents" - it has whatever you asked for - so "what arrived
+     * since last time?" isn't a question it can be asked, and it returns null rather than pretending
+     * a first search result is a new publication.
+     */
+    suspend fun wholeCatalogue(): List<RemoteBook>? = null
+
+    /**
      * Probes the source and reports exactly what happened. This exists because the build
      * environment cannot reach any of these hosts, so the only way to learn how they really behave
      * is to ask a real device and have it report back.

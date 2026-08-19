@@ -237,6 +237,7 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                             book = book,
                             downloading = state.downloadingId == book.id,
                             added = book.id in state.addedIds,
+                            isNew = book.id in state.newIds,
                             onDownload = { viewModel.download(book) },
                         )
                     }
@@ -446,7 +447,13 @@ private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String, Stri
 }
 
 @Composable
-private fun BookRow(book: RemoteBook, downloading: Boolean, added: Boolean, onDownload: () -> Unit) {
+private fun BookRow(
+    book: RemoteBook,
+    downloading: Boolean,
+    added: Boolean,
+    isNew: Boolean,
+    onDownload: () -> Unit,
+) {
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
@@ -458,6 +465,20 @@ private fun BookRow(book: RemoteBook, downloading: Boolean, added: Boolean, onDo
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                // Quiet on purpose: it marks what arrived, it doesn't compete with the title.
+                if (isNew) {
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Text(
+                            "New",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
                 Text(book.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (book.author.isNotBlank()) {
                     Text(
