@@ -10,10 +10,17 @@ import org.jsoup.parser.Parser
  * Implementing it once is what makes new sources nearly free: anything with an OPDS URL can be
  * added without writing code, including a Calibre library you host yourself.
  *
- * A catalogue may publish its feed at more than one path, and sites reorganise them. So rather than
- * betting on a single URL, [feedUrls] is tried in order and the first one that answers wins. If they
- * all fail the error names each URL and what it returned, because "couldn't reach it" with no detail
- * is impossible to act on - for the user or for whoever fixes it next.
+ * Two things about real OPDS feeds decide whether this works at all, and getting either wrong looks
+ * exactly like "the source is empty":
+ *
+ *  - **Feeds are paginated.** A catalogue of thousands of books arrives a page at a time, linked by
+ *    `rel="next"`. Reading only the first page gives you a few dozen books and no hint that the rest
+ *    exist.
+ *  - **Not every feed lists books.** A *navigation* feed lists other feeds ("All Ebooks", "New
+ *    Releases", one per subject). Parsing one for entries with EPUBs finds nothing at all.
+ *
+ * So this crawls: seed URLs first, following `next` links to the end of each catalogue and stepping
+ * into sub-feeds only when a feed turned out to hold no books, all under a hard request budget.
  */
 class OpdsCatalog(
     override val displayName: String,
@@ -34,8 +41,55 @@ class OpdsCatalog(
 
     private var cached: List<RemoteBook>? = null
 
+    /** Every URL that actually served books, in the order they were read. */
+    var loadedFrom: List<String> = emptyList()
+        private set
+
+    /** What each request did - the raw material of the on-device diagnostics report. */
+    private var trace: List<String> = emptyList()
+
+    /** True when the crawl stopped early - a budget ran out, or an address failed. */
+    private var incomplete = false
+
+    /**
+     * Subjects only exist if the feed publishes `<category>` on its entries. Many Calibre servers
+     * don't, so this is discovered from the feed rather than assumed, and stays false until a load
+     * proves otherwise - the UI hides the shelves rather than offering a control that does nothing.
+     */
+    override var supportsBrowse: Boolean = false
+        private set
+
+    /** Subjects actually present in this catalogue, commonest first. */
+    var availableTopics: List<String> = emptyList()
+        private set
+
+    override suspend fun diagnose(): CatalogDiagnosis = try {
+        val books = load()
+        val (probes, download) = runStandardProbes(credentials())
+        CatalogDiagnosis(
+            name = displayName,
+            endpoint = loadedFrom.firstOrNull() ?: feedUrls.first(),
+            ok = books.isNotEmpty(),
+            itemCount = books.size,
+            note = buildString {
+                append(trace.joinToString("; "))
+                if (books.isNotEmpty() && incomplete) {
+                    append(" | incomplete - some addresses failed or the crawl budget ran out")
+                }
+                if (supportsBrowse) append(" | shelves: ${availableTopics.take(6).joinToString(", ")}")
+            },
+            sampleTitles = books.take(3).map { "${it.title} — ${it.author}" },
+            probes = probes,
+            download = download,
+        )
+    } catch (e: CatalogUnavailable) {
+        CatalogDiagnosis(displayName, feedUrls.joinToString(" | "), false, 0, e.attempts.joinToString("; "))
+    } catch (e: Exception) {
+        CatalogDiagnosis(displayName, feedUrls.first(), false, 0, e.message ?: e::class.java.simpleName)
+    }
+
     override suspend fun search(query: String): List<RemoteBook> {
-        val all = cached ?: fetchFeed().also { cached = it }
+        val all = load()
         val q = query.trim()
         if (q.isEmpty()) return all.take(LIMIT)
         return all
@@ -43,38 +97,117 @@ class OpdsCatalog(
             .take(LIMIT)
     }
 
-    private suspend fun fetchFeed(): List<RemoteBook> {
-        val attempts = mutableListOf<String>()
+    override suspend fun browse(topic: String): List<RemoteBook> {
+        val all = load()
+        val t = topic.trim()
+        // A shelf name is a prefix of the catalogue's own wording as often as it is the whole of it
+        // ("Adventure" vs "Adventure stories"), so match on containment rather than demanding the
+        // subject be spelled exactly our way.
+        return all.filter { book -> book.subjects.any { it.contains(t, ignoreCase = true) } }
+            .take(LIMIT)
+    }
+
+    /** Fetches the whole catalogue once, then answers from memory. */
+    private suspend fun load(): List<RemoteBook> = cached ?: crawl().also { cached = it }
+
+    /**
+     * Breadth-first over the feed graph, under a fixed request budget.
+     *
+     * Pagination (`next`) is followed eagerly because it is the same catalogue continued. Sub-feeds
+     * are only entered when a feed held no books of its own, which is exactly the shape of a
+     * navigation feed - so a normal catalogue costs no extra requests.
+     */
+    private suspend fun crawl(): List<RemoteBook> {
+        val found = LinkedHashMap<String, RemoteBook>()
+        val notes = mutableListOf<String>()
+        val servedBooks = mutableListOf<String>()
+        val visited = mutableSetOf<String>()
+        val frontier = ArrayDeque(feedUrls)
+        var requests = 0
         var sawAuthFailure = false
-        for (url in feedUrls) {
-            try {
-                val books = parseFeed(BookHttp.getString(url, credentials(), displayName), url, displayName)
-                if (books.isNotEmpty()) return books
-                attempts += "$url returned no books"
+        var failures = 0
+
+        while (frontier.isNotEmpty() && requests < MAX_REQUESTS && found.size < MAX_BOOKS) {
+            val url = frontier.removeFirst()
+            if (!visited.add(url)) continue
+            requests++
+            val page = try {
+                parsePage(BookHttp.getString(url, credentials(), displayName), url, displayName)
             } catch (e: CatalogAuthRequired) {
                 sawAuthFailure = true
-                attempts += "$url needs a login"
+                failures++
+                notes += "${short(url)} -> asked for a login (401)"
+                continue
             } catch (e: Exception) {
-                attempts += "$url: ${e.message.orEmpty().ifBlank { "failed" }}"
+                failures++
+                notes += "${short(url)} -> ${e.message.orEmpty().ifBlank { "failed" }}"
+                continue
+            }
+
+            page.books.forEach { found.putIfAbsent(it.id, it) }
+            notes += "${short(url)} -> ${page.books.size} books" +
+                if (page.books.isEmpty() && page.subFeeds.isNotEmpty()) " (index of ${page.subFeeds.size} feeds)" else ""
+            if (page.books.isNotEmpty()) servedBooks += url
+
+            // Continue this catalogue to its end before looking anywhere else.
+            page.next?.let { if (it !in visited) frontier.addFirst(it) }
+            // A feed with no books of its own is an index; its children are where the books live.
+            if (page.books.isEmpty()) {
+                page.subFeeds.filterNot { it in visited }.take(MAX_SUBFEEDS).forEach(frontier::addLast)
             }
         }
+
+        val books = found.values.toList()
+        trace = notes
+        // "Some titles are missing" is only worth saying when something actually went wrong or a
+        // budget ran out. A small catalogue that was read to the end is complete, not partial, and
+        // warning about it would be noise on every self-hosted Calibre library.
+        incomplete = failures > 0 || frontier.isNotEmpty()
+        loadedFrom = servedBooks
+        // Catalogues file books under full Library-of-Congress headings, e.g. "England -- Social
+        // life and customs -- 19th century -- Fiction". Those are precise and completely unusable
+        // as a row of chips, so only the short, single-idea subjects become shelves - and a subject
+        // only one book carries isn't a shelf either.
+        availableTopics = books.flatMap { it.subjects }
+            .filter { it.length <= MAX_SHELF_NAME && !it.contains("--") }
+            .groupingBy { it }.eachCount()
+            .filterValues { it >= MIN_BOOKS_PER_SHELF }
+            .entries.sortedByDescending { it.value }.map { it.key }
+        supportsBrowse = availableTopics.size >= MIN_TOPICS
+
+        if (books.isNotEmpty()) return books
         if (sawAuthFailure) throw CatalogAuthRequired(displayName)
-        throw CatalogUnavailable(displayName, attempts)
+        throw CatalogUnavailable(displayName, notes)
     }
+
+    /** Trims a URL down to something readable in an error message. */
+    private fun short(url: String): String = url.substringAfter("://").take(70)
 
     companion object {
         private const val LIMIT = 60
 
+        /** Hard ceilings so a mis-linked feed can never turn into an unbounded crawl. */
+        private const val MAX_REQUESTS = 24
+        private const val MAX_SUBFEEDS = 12
+        private const val MAX_BOOKS = 4_000
+
+        /** One stray keyword isn't a shelf system, but three real subjects already are one. */
+        private const val MIN_TOPICS = 3
+
+        /** Longer than this and it's a cataloguing heading, not a shelf anyone would tap. */
+        private const val MAX_SHELF_NAME = 28
+        private const val MIN_BOOKS_PER_SHELF = 2
+
         /**
-         * Standard Ebooks publishes its catalogue as feeds, but the exact path has moved around and
-         * not every one is open to non-browser clients. Try the documented variants in turn rather
-         * than assuming; the books themselves are public domain and freely downloadable.
+         * Standard Ebooks publishes an OPDS root that links to everything else, so start there and
+         * let the feed say where its books are rather than betting on a path that may have moved.
+         * The direct paths follow as fallbacks.
          */
         val STANDARD_EBOOKS_FEEDS = listOf(
+            "https://standardebooks.org/feeds/opds",
             "https://standardebooks.org/feeds/opds/all",
             "https://standardebooks.org/feeds/atom/all",
             "https://standardebooks.org/feeds/atom/new-releases",
-            "https://standardebooks.org/feeds/opds/new-releases",
         )
 
         fun standardEbooks(credentials: () -> Credentials? = { null }) = OpdsCatalog(
@@ -84,34 +217,72 @@ class OpdsCatalog(
             credentials = credentials,
         )
 
+        /** One fetched feed document: the books on it, the next page, and any feeds it points to. */
+        data class OpdsPage(
+            val books: List<RemoteBook>,
+            val next: String?,
+            val subFeeds: List<String>,
+        )
+
+        /** Convenience for the common case - just the books on one page. */
+        fun parseFeed(xml: String, baseUrl: String, sourceName: String): List<RemoteBook> =
+            parsePage(xml, baseUrl, sourceName).books
+
         /**
-         * Pulls books out of an OPDS/Atom feed. Deliberately separate from the network call so the
-         * parsing - the part most likely to be wrong, and the part I cannot exercise without a
-         * connection - is covered by unit tests.
+         * Pulls books, pagination and sub-feeds out of an OPDS/Atom document. Deliberately separate
+         * from the network call so the parsing - the part most likely to be wrong, and the part I
+         * cannot exercise without a connection - is covered by unit tests.
          */
-        fun parseFeed(xml: String, baseUrl: String, sourceName: String): List<RemoteBook> {
+        fun parsePage(xml: String, baseUrl: String, sourceName: String): OpdsPage {
             // Jsoup is already a dependency (EPUB parsing) and handles Atom fine in XML mode.
             val doc = Jsoup.parse(xml, baseUrl, Parser.xmlParser())
-            return doc.select("entry").mapNotNull { entry ->
+            val entries = doc.select("entry")
+
+            val books = entries.mapNotNull { entry ->
                 val title = entry.selectFirst("title")?.text()?.trim().orEmpty()
                 if (title.isEmpty()) return@mapNotNull null
 
-                // Any link offering an EPUB will do. Plain Atom feeds don't always carry OPDS's
-                // "acquisition" rel, and insisting on it silently drops perfectly good books.
-                val href = entry.select("link")
-                    .firstOrNull { it.attr("type").contains("epub", ignoreCase = true) }
-                    ?.absUrl("href").orEmpty()
+                val links = entry.select("link")
+                // Prefer the exact EPUB media type. Catalogues also offer Kobo's kepub and Kindle's
+                // azw3 on the same entry, and picking whichever came first downloaded a file the
+                // parser can't open. Any other epub-ish type is still better than nothing.
+                val href = (
+                    links.firstOrNull { it.attr("type").trim().equals(EPUB_TYPE, ignoreCase = true) }
+                        ?: links.firstOrNull { it.attr("type").contains("epub", ignoreCase = true) }
+                    )?.absUrl("href").orEmpty()
                 if (href.isEmpty()) return@mapNotNull null
 
                 RemoteBook(
                     id = "opds:$href",
                     title = title,
-                    author = entry.selectFirst("author > name")?.text()?.trim().orEmpty(),
+                    author = entry.select("author > name").firstOrNull()?.text()?.trim().orEmpty(),
                     epubUrl = href,
                     sourceName = sourceName,
                     language = entry.selectFirst("dcterms|language")?.text()?.trim().orEmpty(),
+                    // OPDS puts subjects in <category>; label is the human name, term the code.
+                    subjects = entry.select("category").mapNotNull { c ->
+                        (c.attr("label").ifBlank { c.attr("term") }).trim().takeIf { it.isNotEmpty() }
+                    }.distinct(),
                 )
             }
+
+            // Pagination lives on the feed, not on an entry - checking the parent keeps a book's own
+            // links from ever being mistaken for the next page and sending the crawl in a circle.
+            val next = doc.select("link[rel=next]")
+                .firstOrNull { it.parent()?.nodeName()?.lowercase() != "entry" }
+                ?.absUrl("href")
+                ?.takeIf { it.isNotBlank() && it != baseUrl }
+
+            // Entries in a navigation feed link to other feeds rather than to files.
+            val subFeeds = entries
+                .flatMap { it.select("link") }
+                .filter { it.attr("type").contains("atom+xml", ignoreCase = true) }
+                .mapNotNull { it.absUrl("href").takeIf(String::isNotBlank) }
+                .distinct()
+
+            return OpdsPage(books, next, subFeeds)
         }
+
+        private const val EPUB_TYPE = "application/epub+zip"
     }
 }

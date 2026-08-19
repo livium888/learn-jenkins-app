@@ -57,3 +57,43 @@ object Catalogs {
         }
     }
 }
+
+/**
+ * Public OPDS catalogues offered as one-tap suggestions when adding a source.
+ *
+ * These are *not* built in as permanent chips, and the difference is deliberate: they are addresses
+ * published for OPDS readers, but nothing here can confirm any of them still answers - so they are
+ * offered as a starting point you add and test with the source report, rather than presented as
+ * sources the app promises work. Everything listed is public-domain or openly licensed.
+ */
+object KnownCatalogs {
+    data class Suggestion(val name: String, val url: String, val note: String)
+
+    val suggestions = listOf(
+        Suggestion(
+            "Project Gutenberg (OPDS)",
+            "https://m.gutenberg.org/ebooks.opds/",
+            "Gutenberg's own feed - a second route in if the search above is timing out.",
+        ),
+        Suggestion(
+            "Feedbooks",
+            "https://catalog.feedbooks.com/catalog/index.atom",
+            "Public-domain classics, well organised by subject.",
+        ),
+        Suggestion(
+            "Internet Archive",
+            "https://bookserver.archive.org/catalog/",
+            "The Archive's open-access catalogue. Very large, and mixed in quality.",
+        ),
+        Suggestion(
+            "ManyBooks",
+            "https://manybooks.net/opds/index.php",
+            "Long-running free-ebook library.",
+        ),
+        Suggestion(
+            "OAPEN",
+            "https://library.oapen.org/opds",
+            "Open-access academic books, if you want something drier.",
+        ),
+    )
+}

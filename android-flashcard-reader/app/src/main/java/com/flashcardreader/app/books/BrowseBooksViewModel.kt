@@ -11,6 +11,7 @@ import com.flashcardreader.app.data.books.CatalogUnavailable
 import com.flashcardreader.app.data.books.Catalogs
 import com.flashcardreader.app.data.books.Credentials
 import com.flashcardreader.app.data.books.Discovery
+import com.flashcardreader.app.data.reference.DictionaryPrefs
 import com.flashcardreader.app.data.books.OpdsCatalog
 import com.flashcardreader.app.data.books.CustomFeed
 import com.flashcardreader.app.data.books.RemoteBook
@@ -39,6 +40,11 @@ data class BrowseUiState(
     val topics: List<String> = Discovery.topics,
     val suggestedAuthors: List<String> = Discovery.authors,
     val activeTopic: String? = null,
+    /** Shelves are hidden for sources that can't really browse - see BookCatalog.supportsBrowse. */
+    val supportsBrowse: Boolean = false,
+    /** A probe report the user can send me, since I can't reach these hosts to test them. */
+    val diagnostics: String? = null,
+    val diagnosing: Boolean = false,
 )
 
 /**
@@ -70,6 +76,7 @@ class BrowseBooksViewModel(
             it.copy(
                 catalogNames = catalogs.map { c -> c.displayName },
                 blurb = catalogs.getOrNull(it.selected)?.blurb.orEmpty(),
+                supportsBrowse = catalogs.getOrNull(it.selected)?.supportsBrowse ?: false,
                 customFeeds = prefs.customFeeds,
             )
         }
@@ -78,7 +85,14 @@ class BrowseBooksViewModel(
     fun selectCatalog(index: Int) {
         if (index !in catalogs.indices || index == _uiState.value.selected) return
         _uiState.update {
-            it.copy(selected = index, blurb = catalogs[index].blurb, results = emptyList(), needsLogin = false)
+            it.copy(
+                selected = index,
+                blurb = catalogs[index].blurb,
+                supportsBrowse = catalogs[index].supportsBrowse,
+                results = emptyList(),
+                needsLogin = false,
+                activeTopic = null,
+            )
         }
         search(lastQuery)
     }
@@ -92,6 +106,7 @@ class BrowseBooksViewModel(
             try {
                 val books = catalog.search(query)
                 _uiState.update { it.copy(loading = false, results = books, needsLogin = false) }
+                syncShelves()
             } catch (e: CatalogAuthRequired) {
                 _uiState.update {
                     it.copy(
@@ -129,6 +144,7 @@ class BrowseBooksViewModel(
             try {
                 val books = catalog.browse(topic)
                 _uiState.update { it.copy(loading = false, results = books) }
+                syncShelves()
             } catch (e: CatalogAuthRequired) {
                 _uiState.update {
                     it.copy(loading = false, needsLogin = true, error = "${catalog.displayName} needs you to sign in.")
@@ -146,6 +162,22 @@ class BrowseBooksViewModel(
                     it.copy(loading = false, error = e.message ?: "Couldn't reach ${catalog.displayName}.")
                 }
             }
+        }
+    }
+
+    /**
+     * Shelves are only real if the source publishes subjects, and an OPDS catalogue can only say so
+     * once it has been read. So this runs after every load: the shelf row appears when there is
+     * something behind it, labelled with the catalogue's own subject names rather than ours.
+     */
+    private fun syncShelves() {
+        val catalog = catalogs.getOrNull(_uiState.value.selected) ?: return
+        val own = (catalog as? OpdsCatalog)?.availableTopics.orEmpty()
+        _uiState.update {
+            it.copy(
+                supportsBrowse = catalog.supportsBrowse,
+                topics = if (own.isNotEmpty()) own.take(MAX_SHELVES) else Discovery.topics,
+            )
         }
     }
 
@@ -202,7 +234,42 @@ class BrowseBooksViewModel(
         search(lastQuery)
     }
 
+    /**
+     * Probes every source and builds a plain-text report. The build environment can't reach any of
+     * these hosts (the proxy refuses the connection), so this is how real behaviour gets back to
+     * whoever is fixing it - rather than another round of guessing.
+     */
+    fun runDiagnostics() {
+        _uiState.update { it.copy(diagnosing = true, diagnostics = null) }
+        viewModelScope.launch {
+            val version = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            }.getOrNull().orEmpty()
+            val report = buildString {
+                appendLine("Book source report")
+                appendLine("app: $version | android ${android.os.Build.VERSION.SDK_INT}")
+                appendLine("reading language: ${DictionaryPrefs(context).readingLanguage}")
+                appendLine()
+                catalogs.forEach { catalog ->
+                    append(runCatching { catalog.diagnose().asText() }
+                        .getOrElse { "[FAIL] ${catalog.displayName}\n  crashed: ${it.message}\n" })
+                    appendLine()
+                }
+            }
+            _uiState.update { it.copy(diagnosing = false, diagnostics = report) }
+        }
+    }
+
+    fun dismissDiagnostics() {
+        _uiState.update { it.copy(diagnostics = null) }
+    }
+
     fun consumeMessage() {
         _uiState.update { it.copy(message = null, error = null) }
+    }
+
+    private companion object {
+        /** Enough shelves to browse by, few enough to scan in one swipe. */
+        const val MAX_SHELVES = 14
     }
 }

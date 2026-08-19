@@ -19,6 +19,28 @@ class WikisourceCatalog(private val languageProvider: () -> String) : BookCatalo
 
     override val blurb = "Transcribed texts in many languages - follows your reading language."
 
+    override suspend fun diagnose(): CatalogDiagnosis {
+        val lang = languageProvider().ifBlank { "en" }
+        val endpoint = "https://$lang.wikisource.org/w/api.php (search) + ws-export.wmcloud.org (epub)"
+        return try {
+            val books = search("")
+            val (probes, download) = runStandardProbes()
+            CatalogDiagnosis(
+                name = "$displayName [$lang]",
+                endpoint = endpoint,
+                ok = books.isNotEmpty(),
+                itemCount = books.size,
+                note = if (books.isEmpty()) "reachable but returned nothing" else
+                    "search is per-request, so there is no fixed catalogue size",
+                sampleTitles = books.take(3).map { it.title },
+                probes = probes,
+                download = download,
+            )
+        } catch (e: Exception) {
+            CatalogDiagnosis("$displayName [$lang]", endpoint, false, 0, e.message ?: "failed")
+        }
+    }
+
     override suspend fun search(query: String): List<RemoteBook> {
         val lang = languageProvider().ifBlank { "en" }
         // A blank query has no "popular" equivalent here, so offer a broad, always-populated seed.

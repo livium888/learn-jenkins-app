@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.foundation.layout.FlowRow
@@ -39,14 +41,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.flashcardreader.app.data.books.KnownCatalogs
 import com.flashcardreader.app.data.books.RemoteBook
 import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.AppTopBar
@@ -75,6 +81,9 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             AppTopBar(title = "Free books", onBack = onBack) {
+                IconButton(onClick = { viewModel.runDiagnostics() }) {
+                    Icon(Icons.Filled.BugReport, contentDescription = "Test every source")
+                }
                 IconButton(onClick = { showAddCatalog = true }) {
                     Icon(Icons.Filled.Add, contentDescription = "Add a catalogue")
                 }
@@ -107,19 +116,24 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                 )
             }
 
-            // Shelves, not keywords: the way in when you don't already know a title.
-            Row(
-                modifier = Modifier
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = Spacing.screen, vertical = Spacing.tight),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.tight),
-            ) {
-                state.topics.forEach { topic ->
-                    FilterChip(
-                        selected = topic == state.activeTopic,
-                        onClick = { query = ""; viewModel.browseTopic(topic) },
-                        label = { Text(topic) },
-                    )
+            // Shelves, not keywords: the way in when you don't already know a title. Shown only
+            // where the source really files books by subject - on a catalogue that doesn't, tapping
+            // "Adventure" would just look for that word in titles and come back empty, which reads
+            // as a broken app rather than an inapplicable control.
+            if (state.supportsBrowse) {
+                Row(
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = Spacing.screen, vertical = Spacing.tight),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.tight),
+                ) {
+                    state.topics.forEach { topic ->
+                        FilterChip(
+                            selected = topic == state.activeTopic,
+                            onClick = { query = ""; viewModel.browseTopic(topic) },
+                            label = { Text(topic) },
+                        )
+                    }
                 }
             }
 
@@ -153,10 +167,9 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                             textAlign = TextAlign.Center,
                         )
                         Text(
-                            "The books are still free — the catalogue itself is what's behind an " +
-                                "account. Standard Ebooks offers it to Patrons Circle supporters: " +
-                                "sign in with your patron email as the username and leave the " +
-                                "password blank. Library and Calibre catalogues use their own logins.",
+                            "The books themselves are free — it's this catalogue's own address that " +
+                                "asked who you are. Library and Calibre catalogues use the login you " +
+                                "already have with them.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -186,7 +199,8 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            "Pick a shelf above, or start with one of these:",
+                            if (state.supportsBrowse) "Pick a shelf above, or start with one of these:"
+                            else "This source matches titles and authors. Try one of these:",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -231,6 +245,23 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
         )
     }
 
+    if (state.diagnosing) {
+        AppDialog(onDismiss = {}, dismissible = false) {
+            Text("Testing every source…", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "Running the same searches against every catalogue and trying a real download. " +
+                    "Give it a minute — it is doing real work, not pretending.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            CircularProgressIndicator()
+        }
+    }
+
+    state.diagnostics?.let { report ->
+        DiagnosticsDialog(report = report, onDismiss = { viewModel.dismissDiagnostics() })
+    }
+
     if (showSignIn) {
         SignInDialog(
             catalogName = state.catalogNames.getOrNull(state.selected).orEmpty(),
@@ -240,6 +271,43 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                 viewModel.signIn(user, pass)
             },
         )
+    }
+}
+
+/**
+ * The result of probing every source, in plain text you can copy out.
+ *
+ * This exists because the machine these catalogues are wired up on cannot reach any of them, so the
+ * only honest way to learn how they behave is to have a real phone ask and report back. Copying the
+ * report out beats another round of guessing at what a source returns.
+ */
+@Composable
+private fun DiagnosticsDialog(report: String, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    AppDialog(onDismiss = onDismiss) {
+        Text("Source report", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "What each catalogue returned for the same searches, and whether the first book really " +
+                "downloads. Copy this out if something here is wrong.",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp),
+        ) {
+            Text(
+                report,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.verticalScroll(rememberScrollState()).padding(Spacing.gap),
+            )
+        }
+        PrimaryButton(
+            text = "Copy report",
+            onClick = { clipboard.setText(AnnotatedString(report)) },
+        )
+        OutlineButton(text = "Close", onClick = onDismiss)
     }
 }
 
@@ -285,20 +353,46 @@ private fun SignInDialog(
  * Adds any OPDS catalogue by URL. OPDS is the standard many libraries and Calibre speak, so this
  * is how new sources get added without waiting for an app update.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
     AppDialog(onDismiss = onDismiss) {
         Text("Add a catalogue", style = MaterialTheme.typography.titleLarge)
         Text(
             "Paste the address of an OPDS catalogue — the format used by many public libraries, " +
-                "Standard Ebooks, Feedbooks, and Calibre if you run your own server.",
+                "Feedbooks, and Calibre if you run your own server. Or start from one of these:",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // Typing an OPDS URL from memory is nobody's idea of a good time, and a typo looks exactly
+        // like a dead catalogue. These fill the fields in; the source report says whether they work.
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(Spacing.tight),
+            verticalArrangement = Arrangement.spacedBy(Spacing.tight),
+        ) {
+            KnownCatalogs.suggestions.forEach { suggestion ->
+                SuggestionChip(
+                    onClick = {
+                        name = suggestion.name
+                        url = suggestion.url
+                        note = suggestion.note
+                    },
+                    label = { Text(suggestion.name) },
+                )
+            }
+        }
+        if (note.isNotBlank()) {
+            Text(
+                note,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
