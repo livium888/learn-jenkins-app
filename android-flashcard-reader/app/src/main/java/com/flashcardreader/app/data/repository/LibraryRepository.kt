@@ -5,6 +5,7 @@ import android.net.Uri
 import com.flashcardreader.app.data.db.dao.SourceDao
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.SourceType
+import com.flashcardreader.app.data.books.RemoteBook
 import com.flashcardreader.app.data.gutenberg.GutenbergBook
 import com.flashcardreader.app.data.gutenberg.GutenbergClient
 import com.flashcardreader.app.data.parser.Chapter
@@ -180,6 +181,21 @@ class LibraryRepository(
         val temp = File.createTempFile("gutenberg", ".epub", cacheDir)
         try {
             GutenbergClient.download(book, temp)
+            importFromFile(Uri.fromFile(temp), "${book.title}.epub")
+        } finally {
+            temp.delete()
+        }
+    }
+
+    /**
+     * Downloads a book from any of the free catalogues and runs it through the exact same import
+     * pipeline as a picked file, so a Standard Ebooks or Wikisource title behaves identically to
+     * one you opened yourself - including the size and parse guard-rails.
+     */
+    suspend fun importFromCatalog(book: RemoteBook): Source = withContext(Dispatchers.IO) {
+        val temp = File.createTempFile("catalog", ".epub", cacheDir)
+        try {
+            GutenbergClient.downloadUrl(book.epubUrl, temp)
             importFromFile(Uri.fromFile(temp), "${book.title}.epub")
         } finally {
             temp.delete()

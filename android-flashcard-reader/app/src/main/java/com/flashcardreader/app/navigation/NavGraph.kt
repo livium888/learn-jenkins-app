@@ -14,8 +14,8 @@ import com.flashcardreader.app.ai.AiSettingsScreen
 import com.flashcardreader.app.focus.BlockedAppsScreen
 import com.flashcardreader.app.focus.FocusGateScreen
 import com.flashcardreader.app.focus.FocusGateViewModel
-import com.flashcardreader.app.gutenberg.GutenbergScreen
-import com.flashcardreader.app.gutenberg.GutenbergViewModel
+import com.flashcardreader.app.books.BrowseBooksScreen
+import com.flashcardreader.app.books.BrowseBooksViewModel
 import com.flashcardreader.app.library.LibraryScreen
 import com.flashcardreader.app.library.LibraryViewModel
 import com.flashcardreader.app.reader.ReaderScreen
@@ -32,7 +32,7 @@ private const val ROUTE_REVIEW = "review"
 private const val ROUTE_WORDS = "words"
 private const val ROUTE_STATS = "stats"
 private const val ROUTE_AI = "ai-settings"
-private const val ROUTE_GUTENBERG = "gutenberg"
+private const val ROUTE_GUTENBERG = "free-books"
 private const val ROUTE_READER = "reader/{sourceId}"
 private const val ROUTE_FOCUS = "focus-gate"
 private const val ROUTE_FOCUS_APPS = "focus-gate/apps"
@@ -56,10 +56,12 @@ fun AppNavGraph(app: FlashcardReaderApp) {
             )
         }
         composable(ROUTE_GUTENBERG) {
-            val viewModel: GutenbergViewModel = viewModel(
-                factory = viewModelFactory { initializer { GutenbergViewModel(app.libraryRepository) } },
+            val viewModel: BrowseBooksViewModel = viewModel(
+                factory = viewModelFactory {
+                    initializer { BrowseBooksViewModel(app, app.libraryRepository) }
+                },
             )
-            GutenbergScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            BrowseBooksScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
         composable(ROUTE_REVIEW) {
             val viewModel: ReviewViewModel = viewModel(

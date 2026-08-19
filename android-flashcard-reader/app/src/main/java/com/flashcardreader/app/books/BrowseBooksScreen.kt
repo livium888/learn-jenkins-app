@@ -1,5 +1,6 @@
-package com.flashcardreader.app.gutenberg
+package com.flashcardreader.app.books
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -19,6 +21,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,16 +44,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.flashcardreader.app.data.gutenberg.GutenbergBook
+import com.flashcardreader.app.data.books.RemoteBook
+import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.AppTopBar
+import com.flashcardreader.app.ui.OutlineButton
+import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.ui.Spacing
 
+/** Browse and add free books from any of the available catalogues. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GutenbergScreen(viewModel: GutenbergViewModel, onBack: () -> Unit) {
+fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var query by remember { mutableStateOf("") }
+    var showAddCatalog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.message, state.error) {
         val text = state.message ?: state.error
@@ -61,14 +69,44 @@ fun GutenbergScreen(viewModel: GutenbergViewModel, onBack: () -> Unit) {
     }
 
     Scaffold(
-        topBar = { AppTopBar(title = "Free books", onBack = onBack) },
+        topBar = {
+            AppTopBar(title = "Free books", onBack = onBack) {
+                IconButton(onClick = { showAddCatalog = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add a catalogue")
+                }
+            }
+        },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            // One chip per catalogue. Adding a source later adds a chip here and nothing else.
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = Spacing.screen, vertical = Spacing.tight),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.tight),
+            ) {
+                state.catalogNames.forEachIndexed { index, name ->
+                    FilterChip(
+                        selected = index == state.selected,
+                        onClick = { viewModel.selectCatalog(index) },
+                        label = { Text(name) },
+                    )
+                }
+            }
+            if (state.blurb.isNotBlank()) {
+                Text(
+                    state.blurb,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Spacing.screen),
+                )
+            }
+
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                label = { Text("Search Project Gutenberg — title or author") },
+                label = { Text("Search title or author") },
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium,
                 trailingIcon = {
@@ -116,10 +154,61 @@ fun GutenbergScreen(viewModel: GutenbergViewModel, onBack: () -> Unit) {
             }
         }
     }
+
+    if (showAddCatalog) {
+        AddCatalogDialog(
+            onDismiss = { showAddCatalog = false },
+            onAdd = { name, url ->
+                showAddCatalog = false
+                viewModel.addCustomFeed(name, url)
+            },
+        )
+    }
+}
+
+/**
+ * Adds any OPDS catalogue by URL. OPDS is the standard many libraries and Calibre speak, so this
+ * is how new sources get added without waiting for an app update.
+ */
+@Composable
+private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    AppDialog(onDismiss = onDismiss) {
+        Text("Add a catalogue", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Paste the address of an OPDS catalogue — the format used by many public libraries, " +
+                "Standard Ebooks, Feedbooks, and Calibre if you run your own server.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("Name") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = url,
+            onValueChange = { url = it },
+            label = { Text("https://…/opds") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        PrimaryButton(
+            text = "Add catalogue",
+            enabled = url.isNotBlank(),
+            onClick = { onAdd(name, url) },
+        )
+        OutlineButton(text = "Cancel", onClick = onDismiss)
+    }
 }
 
 @Composable
-private fun BookRow(book: GutenbergBook, downloading: Boolean, added: Boolean, onDownload: () -> Unit) {
+private fun BookRow(book: RemoteBook, downloading: Boolean, added: Boolean, onDownload: () -> Unit) {
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
@@ -132,12 +221,15 @@ private fun BookRow(book: GutenbergBook, downloading: Boolean, added: Boolean, o
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(book.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(book.author, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    "${book.downloadCount} downloads",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (book.author.isNotBlank()) {
+                    Text(
+                        book.author,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             when {
                 downloading -> CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(end = 12.dp))

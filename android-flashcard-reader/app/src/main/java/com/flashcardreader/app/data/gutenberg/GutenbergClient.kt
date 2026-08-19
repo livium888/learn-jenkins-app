@@ -35,8 +35,11 @@ object GutenbergClient {
     }
 
     /** Downloads the book's EPUB to [dest]; throws on a network or HTTP error. */
-    suspend fun download(book: GutenbergBook, dest: File) = withContext(Dispatchers.IO) {
-        val conn = (URL(book.epubUrl).openConnection() as HttpURLConnection).apply {
+    suspend fun download(book: GutenbergBook, dest: File) = downloadUrl(book.epubUrl, dest)
+
+    /** Fetches any catalogue's EPUB to [dest]; shared by every free-book source. */
+    suspend fun downloadUrl(epubUrl: String, dest: File) = withContext(Dispatchers.IO) {
+        val conn = (URL(epubUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20000
             readTimeout = 60000
             instanceFollowRedirects = true
