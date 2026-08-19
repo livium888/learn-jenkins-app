@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,6 +60,7 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     var query by remember { mutableStateOf("") }
     var showAddCatalog by remember { mutableStateOf(false) }
+    var showSignIn by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.message, state.error) {
         val text = state.message ?: state.error
@@ -121,6 +123,29 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
 
             when {
                 state.loading -> Center { CircularProgressIndicator() }
+                state.needsLogin -> Center {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(Spacing.gap),
+                        modifier = Modifier.padding(32.dp),
+                    ) {
+                        Text(
+                            "This catalogue needs a sign-in",
+                            style = MaterialTheme.typography.titleMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            "The books are still free — the catalogue itself is what's behind an " +
+                                "account. Standard Ebooks offers it to Patrons Circle supporters: " +
+                                "sign in with your patron email as the username and leave the " +
+                                "password blank. Library and Calibre catalogues use their own logins.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        PrimaryButton(text = "Sign in", onClick = { showSignIn = true })
+                    }
+                }
                 state.error != null && state.results.isEmpty() -> Center {
                     Text(
                         state.error ?: "",
@@ -158,11 +183,60 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
     if (showAddCatalog) {
         AddCatalogDialog(
             onDismiss = { showAddCatalog = false },
-            onAdd = { name, url ->
+            onAdd = { name, url, user, pass ->
                 showAddCatalog = false
-                viewModel.addCustomFeed(name, url)
+                viewModel.addCustomFeed(name, url, user, pass)
             },
         )
+    }
+
+    if (showSignIn) {
+        SignInDialog(
+            catalogName = state.catalogNames.getOrNull(state.selected).orEmpty(),
+            onDismiss = { showSignIn = false },
+            onSignIn = { user, pass ->
+                showSignIn = false
+                viewModel.signIn(user, pass)
+            },
+        )
+    }
+}
+
+/** Basic-auth sign-in for a catalogue that requires an account. */
+@Composable
+private fun SignInDialog(
+    catalogName: String,
+    onDismiss: () -> Unit,
+    onSignIn: (String, String) -> Unit,
+) {
+    var user by remember { mutableStateOf("") }
+    var pass by remember { mutableStateOf("") }
+    AppDialog(onDismiss = onDismiss) {
+        Text("Sign in to $catalogName", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Stored encrypted on this device only, and never included in a backup.",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = user,
+            onValueChange = { user = it },
+            label = { Text("Username or email") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = pass,
+            onValueChange = { pass = it },
+            label = { Text("Password (leave blank if none)") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        PrimaryButton(text = "Sign in", enabled = user.isNotBlank(), onClick = { onSignIn(user, pass) })
+        OutlineButton(text = "Cancel", onClick = onDismiss)
     }
 }
 
@@ -171,9 +245,11 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
  * is how new sources get added without waiting for an app update.
  */
 @Composable
-private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String) -> Unit) {
+private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
+    var user by remember { mutableStateOf("") }
+    var pass by remember { mutableStateOf("") }
     AppDialog(onDismiss = onDismiss) {
         Text("Add a catalogue", style = MaterialTheme.typography.titleLarge)
         Text(
@@ -198,10 +274,27 @@ private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String) -> U
             shape = MaterialTheme.shapes.medium,
             modifier = Modifier.fillMaxWidth(),
         )
+        OutlinedTextField(
+            value = user,
+            onValueChange = { user = it },
+            label = { Text("Username (optional)") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = pass,
+            onValueChange = { pass = it },
+            label = { Text("Password (optional)") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+        )
         PrimaryButton(
             text = "Add catalogue",
             enabled = url.isNotBlank(),
-            onClick = { onAdd(name, url) },
+            onClick = { onAdd(name, url, user, pass) },
         )
         OutlineButton(text = "Cancel", onClick = onDismiss)
     }

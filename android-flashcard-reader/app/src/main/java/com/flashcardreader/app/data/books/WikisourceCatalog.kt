@@ -26,7 +26,7 @@ class WikisourceCatalog(private val languageProvider: () -> String) : BookCatalo
         val url = "https://$lang.wikisource.org/w/api.php" +
             "?action=query&list=search&format=json&srnamespace=0&srlimit=$LIMIT" +
             "&srsearch=${URLEncoder.encode(term, "UTF-8")}"
-        val json = BookHttp.getString(url)
+        val json = BookHttp.getString(url, catalogName = displayName)
         val hits = JSONObject(json).optJSONObject("query")?.optJSONArray("search") ?: return emptyList()
         return (0 until hits.length()).mapNotNull { i ->
             val title = hits.getJSONObject(i).optString("title").takeIf { it.isNotBlank() }

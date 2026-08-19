@@ -46,12 +46,13 @@ object Catalogs {
     fun all(context: Context): List<BookCatalog> {
         val dictionary = DictionaryPrefs(context)
         val custom = BookSourcePrefs(context).customFeeds
+        val logins = CatalogCredentials(context)
         return buildList {
             add(GutenbergCatalog())
-            add(OpdsCatalog.standardEbooks())
+            add(OpdsCatalog.standardEbooks { logins.get(OpdsCatalog.STANDARD_EBOOKS_FEED) })
             add(WikisourceCatalog { dictionary.readingLanguage })
             custom.forEach { feed ->
-                add(OpdsCatalog(feed.name, "Your own catalogue", feed.url))
+                add(OpdsCatalog(feed.name, "Your own catalogue", feed.url) { logins.get(feed.url) })
             }
         }
     }

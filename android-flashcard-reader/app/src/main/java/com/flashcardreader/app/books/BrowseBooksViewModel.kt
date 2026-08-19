@@ -5,7 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.data.books.BookCatalog
 import com.flashcardreader.app.data.books.BookSourcePrefs
+import com.flashcardreader.app.data.books.CatalogAuthRequired
+import com.flashcardreader.app.data.books.CatalogCredentials
 import com.flashcardreader.app.data.books.Catalogs
+import com.flashcardreader.app.data.books.Credentials
+import com.flashcardreader.app.data.books.OpdsCatalog
 import com.flashcardreader.app.data.books.CustomFeed
 import com.flashcardreader.app.data.books.RemoteBook
 import com.flashcardreader.app.data.repository.LibraryRepository
@@ -27,6 +31,8 @@ data class BrowseUiState(
     val addedIds: Set<String> = emptySet(),
     val message: String? = null,
     val customFeeds: List<CustomFeed> = emptyList(),
+    /** Set when the selected catalogue answered "who are you?" - the fix is signing in, not retrying. */
+    val needsLogin: Boolean = false,
 )
 
 /**
@@ -40,6 +46,7 @@ class BrowseBooksViewModel(
 ) : ViewModel() {
 
     private val prefs = BookSourcePrefs(context)
+    private val logins = CatalogCredentials(context)
     private var catalogs: List<BookCatalog> = Catalogs.all(context)
     private var lastQuery = ""
 
@@ -64,18 +71,28 @@ class BrowseBooksViewModel(
 
     fun selectCatalog(index: Int) {
         if (index !in catalogs.indices || index == _uiState.value.selected) return
-        _uiState.update { it.copy(selected = index, blurb = catalogs[index].blurb, results = emptyList()) }
+        _uiState.update {
+            it.copy(selected = index, blurb = catalogs[index].blurb, results = emptyList(), needsLogin = false)
+        }
         search(lastQuery)
     }
 
     fun search(query: String) {
         lastQuery = query
         val catalog = catalogs.getOrNull(_uiState.value.selected) ?: return
-        _uiState.update { it.copy(loading = true, error = null) }
+        _uiState.update { it.copy(loading = true, error = null, needsLogin = false) }
         viewModelScope.launch {
             try {
                 val books = catalog.search(query)
-                _uiState.update { it.copy(loading = false, results = books) }
+                _uiState.update { it.copy(loading = false, results = books, needsLogin = false) }
+            } catch (e: CatalogAuthRequired) {
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        needsLogin = true,
+                        error = "${catalog.displayName} needs you to sign in.",
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -85,6 +102,19 @@ class BrowseBooksViewModel(
                 }
             }
         }
+    }
+
+    /** The feed URL of the selected catalogue, when it is one that can take a login. */
+    private fun selectedFeedUrl(): String? =
+        (catalogs.getOrNull(_uiState.value.selected) as? OpdsCatalog)?.feedUrl
+
+    /** Saves a login for the selected catalogue and retries the search. */
+    fun signIn(username: String, password: String) {
+        val url = selectedFeedUrl() ?: return
+        logins.put(url, Credentials(username.trim(), password))
+        // Credentials are read through a lambda, so rebuild so the catalogue picks them up.
+        refreshCatalogs()
+        search(lastQuery)
     }
 
     fun download(book: RemoteBook) {
@@ -109,11 +139,12 @@ class BrowseBooksViewModel(
     }
 
     /** Adds a catalogue by URL - any OPDS feed, including a Calibre server you run yourself. */
-    fun addCustomFeed(name: String, url: String) {
+    fun addCustomFeed(name: String, url: String, username: String = "", password: String = "") {
         val cleanUrl = url.trim()
         if (cleanUrl.isBlank()) return
         val cleanName = name.trim().ifBlank { "My catalogue" }
         prefs.add(CustomFeed(cleanName, cleanUrl))
+        if (username.isNotBlank()) logins.put(cleanUrl, Credentials(username.trim(), password))
         refreshCatalogs()
         _uiState.update { it.copy(message = "Added “$cleanName”") }
     }

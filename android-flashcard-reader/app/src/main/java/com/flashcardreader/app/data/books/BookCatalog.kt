@@ -1,5 +1,6 @@
 package com.flashcardreader.app.data.books
 
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -32,22 +33,38 @@ interface BookCatalog {
     suspend fun search(query: String): List<RemoteBook>
 }
 
+/**
+ * Thrown when a catalogue exists but won't talk to us without an account - a library card, a
+ * Calibre login, or a Standard Ebooks patron email. Separate from a generic failure because the
+ * fix is completely different: sign in, rather than check your connection.
+ */
+class CatalogAuthRequired(val catalogName: String) : IOException("$catalogName needs a login")
+
 /** Shared plain-HTTP helper - same no-dependency approach as the rest of the app's networking. */
 internal object BookHttp {
     private const val USER_AGENT = "FlashcardReader/1.0 (personal reading app)"
 
-    suspend fun getString(urlStr: String): String = withContext(Dispatchers.IO) {
+    suspend fun getString(
+        urlStr: String,
+        credentials: Credentials? = null,
+        catalogName: String = "This catalogue",
+    ): String = withContext(Dispatchers.IO) {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 30_000
             requestMethod = "GET"
             instanceFollowRedirects = true
             setRequestProperty("User-Agent", USER_AGENT)
+            if (credentials != null) {
+                val raw = "${credentials.username}:${credentials.password}"
+                val encoded = Base64.encodeToString(raw.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                setRequestProperty("Authorization", "Basic $encoded")
+            }
         }
         try {
-            if (conn.responseCode !in 200..299) {
-                throw IOException("HTTP ${conn.responseCode} from $urlStr")
-            }
+            val code = conn.responseCode
+            if (code == 401 || code == 403) throw CatalogAuthRequired(catalogName)
+            if (code !in 200..299) throw IOException("HTTP $code from $urlStr")
             conn.inputStream.bufferedReader().use { it.readText() }
         } finally {
             conn.disconnect()

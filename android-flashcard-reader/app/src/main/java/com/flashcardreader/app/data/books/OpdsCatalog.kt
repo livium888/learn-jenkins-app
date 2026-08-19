@@ -17,7 +17,8 @@ import org.jsoup.parser.Parser
 class OpdsCatalog(
     override val displayName: String,
     override val blurb: String,
-    private val feedUrl: String,
+    val feedUrl: String,
+    private val credentials: () -> Credentials? = { null },
 ) : BookCatalog {
 
     private var cached: List<RemoteBook>? = null
@@ -32,7 +33,7 @@ class OpdsCatalog(
     }
 
     private suspend fun fetchFeed(): List<RemoteBook> =
-        parseFeed(BookHttp.getString(feedUrl), feedUrl, displayName)
+        parseFeed(BookHttp.getString(feedUrl, credentials(), displayName), feedUrl, displayName)
 
     companion object {
         private const val LIMIT = 60
@@ -72,10 +73,18 @@ class OpdsCatalog(
          * of OCR debris, and clean chapter markup, which also gives the reader better chapters and
          * the flashcards better sentences.
          */
-        fun standardEbooks() = OpdsCatalog(
+        const val STANDARD_EBOOKS_FEED = "https://standardebooks.org/feeds/opds/all"
+
+        /**
+         * Standard Ebooks gates its catalogue behind Patrons Circle membership - the books are
+         * free and public domain, but automated access to the catalogue is a supporter benefit.
+         * Sign in with your patron email as the username and no password.
+         */
+        fun standardEbooks(credentials: () -> Credentials? = { null }) = OpdsCatalog(
             displayName = "Standard Ebooks",
-            blurb = "Classics, carefully typeset. The cleanest text of any free source.",
-            feedUrl = "https://standardebooks.org/feeds/opds/all",
+            blurb = "Beautifully typeset classics. Needs a free Patrons Circle sign-in.",
+            feedUrl = STANDARD_EBOOKS_FEED,
+            credentials = credentials,
         )
     }
 }

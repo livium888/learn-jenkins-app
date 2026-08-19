@@ -9,4 +9,6 @@
     <exclude domain="sharedpref" path="ai_prefs_secure.xml" />
     <exclude domain="sharedpref" path="focus_credit.xml" />
     <exclude domain="sharedpref" path="focus_prefs.xml" />
+    <exclude domain="sharedpref" path="catalog_credentials.xml" />
+    <exclude domain="sharedpref" path="catalog_credentials_secure.xml" />
 </full-backup-content>
