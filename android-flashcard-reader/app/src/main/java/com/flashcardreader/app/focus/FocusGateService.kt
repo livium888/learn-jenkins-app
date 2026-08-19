@@ -91,6 +91,22 @@ class FocusGateService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSt
         private const val IDLE_POLL_MS = 2_500L
         private const val RECENT_BLOCKED_MS = 30_000L
 
+        /** How far back to look before any foreground app is known (events arrive late/batched). */
+        private const val COLD_LOOKBACK_MS = 2 * 60 * 60 * 1000L
+
+        /** Overlap on incremental queries, since events can arrive out of order. */
+        private const val OVERLAP_MS = 10_000L
+
+        /** Last package the watcher saw in front - surfaced in settings so this isn't a black box. */
+        @Volatile
+        var lastDetected: String? = null
+            internal set
+
+        /** Set when putting the gate on screen failed, so the settings screen can say so. */
+        @Volatile
+        var lastOverlayError: String? = null
+            internal set
+
         fun start(context: Context) {
             runCatching {
                 androidx.core.content.ContextCompat.startForegroundService(
@@ -181,21 +197,35 @@ class FocusGateService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSt
      * The package most recently moved to the foreground. Usage events arrive late and batched, so
      * the window is queried with an overlap rather than exactly since the last poll.
      */
+    /**
+     * The package currently in front, from usage events.
+     *
+     * The window matters more than it looks. Usage events are delivered late and in batches, and an
+     * app you have been sitting in for a while produced its "moved to foreground" event long ago -
+     * so a short window from `now` finds nothing and the gate concludes, wrongly, that no app is in
+     * front. Until a foreground app is known we therefore look a long way back; after that a short
+     * overlapping window is enough to catch each switch.
+     */
     private fun currentForegroundPackage(): String? {
         val now = System.currentTimeMillis()
-        val since = if (lastEventCursor == 0L) now - 10_000 else lastEventCursor - 5_000
+        val since = if (lastForeground == null) now - COLD_LOOKBACK_MS else lastEventCursor - OVERLAP_MS
         val events = usage.queryEvents(since, now)
         val event = UsageEvents.Event()
         var latest: String? = null
         var latestAt = 0L
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND && event.timeStamp >= latestAt) {
+            // MOVE_TO_FOREGROUND and ACTIVITY_RESUMED are the same value; the former is deprecated
+            // but still what older devices report.
+            val isForeground = event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND ||
+                event.eventType == UsageEvents.Event.ACTIVITY_RESUMED
+            if (isForeground && event.timeStamp >= latestAt) {
                 latest = event.packageName
                 latestAt = event.timeStamp
             }
         }
         if (latestAt > 0) lastEventCursor = latestAt
+        if (latest != null) lastDetected = latest
         return latest ?: lastForeground
     }
 
@@ -270,6 +300,11 @@ class FocusGateService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSt
         runCatching {
             windowManager.addView(view, params)
             overlay = view
+            lastOverlayError = null
+        }.onFailure { error ->
+            // Swallowing this silently is what makes "the gate just doesn't appear" impossible to
+            // diagnose, so keep the reason where the settings screen can show it.
+            lastOverlayError = error.message ?: error::class.java.simpleName
         }
     }
 

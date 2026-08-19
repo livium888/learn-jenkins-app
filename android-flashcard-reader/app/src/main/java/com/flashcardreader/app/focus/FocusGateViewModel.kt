@@ -29,6 +29,10 @@ data class FocusUiState(
     val apps: List<InstalledApp> = emptyList(),
     val loadingApps: Boolean = false,
     val balanceSeconds: Long = 0L,
+    /** Diagnostics, so "it just doesn't work" is answerable without a debugger. */
+    val serviceRunning: Boolean = false,
+    val lastDetected: String? = null,
+    val overlayError: String? = null,
 )
 
 class FocusGateViewModel(
@@ -60,6 +64,9 @@ class FocusGateViewModel(
                 hasUsageAccess = UsageAccess.hasUsageAccess(context),
                 canOverlay = UsageAccess.canDrawOverlays(context),
                 blocked = prefs.blockedPackages,
+                serviceRunning = FocusGateService.isRunning,
+                lastDetected = FocusGateService.lastDetected,
+                overlayError = FocusGateService.lastOverlayError,
             )
         }
         // The gate can't work without its grants; don't leave it claiming to be on.

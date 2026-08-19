@@ -18,12 +18,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,6 +51,15 @@ fun FocusGateScreen(
     // Settings grants always report RESULT_CANCELED, and some OEM screens never return, so the
     // only reliable check is to re-read the real state every time we come back.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
+
+    // Poll the watcher's state while this screen is open so the status below is live - being able
+    // to watch it notice the app you just switched to is the fastest way to tell what's wrong.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(2_000)
+            viewModel.refresh()
+        }
+    }
 
     val ready = state.hasUsageAccess && state.canOverlay
 
@@ -153,6 +164,27 @@ fun FocusGateScreen(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            if (state.enabled) {
+                SectionCard {
+                    SectionTitle("Status")
+                    StatValue("Watcher running", if (state.serviceRunning) "Yes" else "No")
+                    StatValue("App in front", state.lastDetected?.substringAfterLast('.') ?: "—")
+                    state.overlayError?.let {
+                        Text(
+                            "The gate couldn't be shown: $it",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    Text(
+                        "If \"App in front\" never changes when you switch apps, usage access isn't " +
+                            "really granted - revoke and grant it again.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             SectionCard {
