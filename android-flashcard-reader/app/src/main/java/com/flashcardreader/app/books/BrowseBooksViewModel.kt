@@ -10,6 +10,7 @@ import com.flashcardreader.app.data.books.CatalogCredentials
 import com.flashcardreader.app.data.books.CatalogUnavailable
 import com.flashcardreader.app.data.books.Catalogs
 import com.flashcardreader.app.data.books.Credentials
+import com.flashcardreader.app.data.books.Discovery
 import com.flashcardreader.app.data.books.OpdsCatalog
 import com.flashcardreader.app.data.books.CustomFeed
 import com.flashcardreader.app.data.books.RemoteBook
@@ -34,6 +35,10 @@ data class BrowseUiState(
     val customFeeds: List<CustomFeed> = emptyList(),
     /** Set when the selected catalogue answered "who are you?" - the fix is signing in, not retrying. */
     val needsLogin: Boolean = false,
+    /** Subject shelves and author suggestions - the way in when you don't know a title. */
+    val topics: List<String> = Discovery.topics,
+    val suggestedAuthors: List<String> = Discovery.authors,
+    val activeTopic: String? = null,
 )
 
 /**
@@ -80,6 +85,7 @@ class BrowseBooksViewModel(
 
     fun search(query: String) {
         lastQuery = query
+        _uiState.update { it.copy(activeTopic = null) }
         val catalog = catalogs.getOrNull(_uiState.value.selected) ?: return
         _uiState.update { it.copy(loading = true, error = null, needsLogin = false) }
         viewModelScope.launch {
@@ -109,6 +115,35 @@ class BrowseBooksViewModel(
                         loading = false,
                         error = "Couldn't reach ${catalog.displayName}. ${e.message.orEmpty()}".trim(),
                     )
+                }
+            }
+        }
+    }
+
+    /** Browses a subject shelf rather than searching for words in a title. */
+    fun browseTopic(topic: String) {
+        val catalog = catalogs.getOrNull(_uiState.value.selected) ?: return
+        lastQuery = ""
+        _uiState.update { it.copy(loading = true, error = null, needsLogin = false, activeTopic = topic) }
+        viewModelScope.launch {
+            try {
+                val books = catalog.browse(topic)
+                _uiState.update { it.copy(loading = false, results = books) }
+            } catch (e: CatalogAuthRequired) {
+                _uiState.update {
+                    it.copy(loading = false, needsLogin = true, error = "${catalog.displayName} needs you to sign in.")
+                }
+            } catch (e: CatalogUnavailable) {
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        error = "${catalog.displayName} didn't respond.\n" +
+                            e.attempts.joinToString("\n") { attempt -> "• $attempt" },
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(loading = false, error = e.message ?: "Couldn't reach ${catalog.displayName}.")
                 }
             }
         }

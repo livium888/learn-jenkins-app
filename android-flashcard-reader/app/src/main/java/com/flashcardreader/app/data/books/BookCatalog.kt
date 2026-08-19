@@ -31,6 +31,12 @@ interface BookCatalog {
 
     /** A blank query should return something browsable rather than nothing. */
     suspend fun search(query: String): List<RemoteBook>
+
+    /**
+     * Browse a subject. Most catalogues have nothing better than their search, but Gutenberg can
+     * match real bookshelves, which is far more useful than title matching for a genre word.
+     */
+    suspend fun browse(topic: String): List<RemoteBook> = search(topic)
 }
 
 /**

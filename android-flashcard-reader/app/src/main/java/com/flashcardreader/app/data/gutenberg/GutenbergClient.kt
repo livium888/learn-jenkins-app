@@ -27,11 +27,22 @@ data class GutenbergBook(
  */
 object GutenbergClient {
     private const val BASE = "https://gutendex.com/books"
+    private const val ATTEMPTS = 2
+    private const val RETRY_DELAY_MS = 700L
 
     /** Search by title/author. A blank query returns the most-downloaded books (a "popular" list). */
     suspend fun search(query: String): List<GutenbergBook> = withContext(Dispatchers.IO) {
         val url = if (query.isBlank()) BASE else "$BASE?search=${URLEncoder.encode(query, "UTF-8")}"
         parseBooks(httpGetString(url))
+    }
+
+    /**
+     * Browse by subject or bookshelf rather than title. Gutendex's `topic` matches subjects and
+     * shelves, so "adventure" finds the adventure shelf instead of books with it in the title -
+     * which is what makes browsing 70,000 books possible without knowing a title up front.
+     */
+    suspend fun browseTopic(topic: String): List<GutenbergBook> = withContext(Dispatchers.IO) {
+        parseBooks(httpGetString("$BASE?topic=${URLEncoder.encode(topic, "UTF-8")}"))
     }
 
     /** Downloads the book's EPUB to [dest]; throws on a network or HTTP error. */
@@ -54,10 +65,33 @@ object GutenbergClient {
         }
     }
 
+    /**
+     * Gutendex is a free, community-run service in front of Project Gutenberg, and it is genuinely
+     * slow or unreachable from time to time. One quick retry turns most of those blips into a
+     * successful search; a failure that survives the retry gets an error that says what actually
+     * happened rather than a bare timeout.
+     */
     private fun httpGetString(urlStr: String): String {
+        var lastError: IOException? = null
+        repeat(ATTEMPTS) { attempt ->
+            try {
+                return requestOnce(urlStr)
+            } catch (e: IOException) {
+                lastError = e
+                if (attempt < ATTEMPTS - 1) Thread.sleep(RETRY_DELAY_MS)
+            }
+        }
+        throw IOException(
+            "Project Gutenberg's search service didn't respond. It's a free community service " +
+                "that's occasionally down - Standard Ebooks and Wikisource still work.",
+            lastError,
+        )
+    }
+
+    private fun requestOnce(urlStr: String): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 20000
-            readTimeout = 30000
+            connectTimeout = 15000
+            readTimeout = 20000
             requestMethod = "GET"
             instanceFollowRedirects = true
         }

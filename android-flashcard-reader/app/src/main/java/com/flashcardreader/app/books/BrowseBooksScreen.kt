@@ -21,7 +21,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,7 +55,7 @@ import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.ui.Spacing
 
 /** Browse and add free books from any of the available catalogues. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -103,6 +105,22 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = Spacing.screen),
                 )
+            }
+
+            // Shelves, not keywords: the way in when you don't already know a title.
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = Spacing.screen, vertical = Spacing.tight),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.tight),
+            ) {
+                state.topics.forEach { topic ->
+                    FilterChip(
+                        selected = topic == state.activeTopic,
+                        onClick = { query = ""; viewModel.browseTopic(topic) },
+                        label = { Text(topic) },
+                    )
+                }
             }
 
             OutlinedTextField(
@@ -156,12 +174,35 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                     )
                 }
                 state.results.isEmpty() -> Center {
-                    Text(
-                        "No books found. Try another title or author.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(32.dp),
-                    )
+                    // "Not found" with no way forward is what makes browsing feel like guessing,
+                    // so offer names that are certain to return something.
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(Spacing.gap),
+                        modifier = Modifier.padding(Spacing.screen),
+                    ) {
+                        Text(
+                            "Nothing matched that.",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            "Pick a shelf above, or start with one of these:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.tight),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.tight),
+                        ) {
+                            state.suggestedAuthors.forEach { author ->
+                                SuggestionChip(
+                                    onClick = { query = author; viewModel.search(author) },
+                                    label = { Text(author) },
+                                )
+                            }
+                        }
+                    }
                 }
                 else -> LazyColumn(
                     contentPadding = PaddingValues(start = Spacing.screen, end = Spacing.screen, bottom = Spacing.screen),
