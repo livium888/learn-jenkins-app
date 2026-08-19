@@ -169,4 +169,38 @@ class ReadingCreditTrackerTest {
         }
         assertEquals(0, credited)
     }
+
+    @Test
+    fun `a page read before still counts as reading, even though it cannot earn again`() {
+        // The bug this pins down: pages credited in an earlier session are restored into the
+        // tracker, and the old code returned before dwell was even measured for them. Re-open a
+        // book you have read and the app saw someone who read nothing - so comprehension checks
+        // never fired and the time-actually-read tally stayed at zero.
+        val t = tracker()
+        t.restore(setOf(0))
+
+        val ticks = readOnePage(t, chunk = 0)
+
+        assertNull("a page already paid for must not pay twice", ticks.firstOrNull { it.creditedChunk != null })
+        val read = ticks.firstOrNull { it.readChunk != null }
+        assertTrue("but it must still register as having been read", read != null)
+        assertEquals(pageWords, read!!.readWords)
+    }
+
+    @Test
+    fun `a page reports as read once per session, not once per tick`() {
+        val t = tracker()
+        val reads = readOnePage(t, chunk = 0).count { it.readChunk != null }
+        assertEquals("dwelling longer must not keep re-counting the same page", 1, reads)
+    }
+
+    @Test
+    fun `flinging past a page you have read before still earns no reading`() {
+        // The anti-fake floor has to hold for the read signal too, or re-reading would become the
+        // way to fake it: scroll a familiar book fast and collect questions you never earned.
+        val t = tracker()
+        t.restore(setOf(0))
+        val ticks = readOnePage(t, chunk = 0, totalMs = 1_000L)
+        assertNull("too fast to have been read", ticks.firstOrNull { it.readChunk != null })
+    }
 }

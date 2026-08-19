@@ -4,12 +4,14 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,7 +20,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.flashcardreader.app.ai.AiPrefs
 import com.flashcardreader.app.theme.ReaderFont
@@ -35,12 +39,16 @@ fun ReaderSettingsSheet(
     onDismiss: () -> Unit,
     /** This book, so its comprehension checks can be turned off without leaving the reader. */
     sourceId: Long = 0,
+    /** Why a reading question has or hasn't appeared - built fresh each time it's shown. */
+    readingCheckReport: () -> String = { "" },
 ) {
     val context = LocalContext.current
     val aiPrefs = remember { AiPrefs(context) }
     // Only worth showing when checks are actually running; otherwise it is a switch about nothing.
     val checksOn = aiPrefs.isReady && aiPrefs.readingChecks
     var excluded by remember(sourceId) { mutableStateOf(sourceId in aiPrefs.excludedSources) }
+    var showCheckReport by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
 
     AppDialog(onDismiss = onDismiss) {
         Text("Reading settings", style = MaterialTheme.typography.titleLarge)
@@ -71,6 +79,31 @@ fun ReaderSettingsSheet(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        // "Nothing happened" has a dozen possible causes and no way to tell them apart, so the
+        // reader can ask what the app thinks it is doing rather than guessing - or waiting.
+        if (aiPrefs.readingChecks && sourceId != 0L) {
+            TextButton(onClick = { showCheckReport = !showCheckReport }) {
+                Text(if (showCheckReport) "Hide question status" else "Why no question yet?")
+            }
+            if (showCheckReport) {
+                val report = readingCheckReport()
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        report,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+                TextButton(onClick = { clipboard.setText(AnnotatedString(report)) }) {
+                    Text("Copy status")
+                }
+            }
         }
 
         Label("Font")

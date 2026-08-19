@@ -129,7 +129,9 @@ class AiPrefs(context: Context) {
             }
         }
 
-        const val DEFAULT_MODEL = "gemini-1.5-flash"
+        // Google retires older model ids, and a retired one fails with a 404 that used to surface
+        // as nothing at all. Anyone who set their own model keeps it; this only moves the default.
+        const val DEFAULT_MODEL = "gemini-2.5-flash"
         const val DEFAULT_LANGUAGE = "English"
 
         /** Placeholders {word} {sentence} {my_guess} {my_language} are filled at call time. */

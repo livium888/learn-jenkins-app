@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.launch
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -20,12 +21,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.flashcardreader.app.ui.AppTopBar
+import androidx.compose.material3.Surface
+import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.ui.SectionCard
 import com.flashcardreader.app.ui.Spacing
 
@@ -42,6 +46,9 @@ fun AiSettingsScreen(onBack: () -> Unit) {
     var template by remember { mutableStateOf(prefs.promptTemplate) }
     var readingChecks by remember { mutableStateOf(prefs.readingChecks) }
     var checkMinutes by remember { mutableStateOf(prefs.readingCheckMinutes) }
+    var testResult by remember { mutableStateOf("") }
+    var testing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = { AppTopBar(title = "AI tutor", onBack = onBack) },
@@ -120,6 +127,39 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+
+                    // Waiting minutes to find out your key is wrong is a miserable way to learn it.
+                    // This asks the model one question about a fixed passage and shows the raw
+                    // answer, so a broken key, a retired model or a refused request says so at once.
+                    PrimaryButton(
+                        text = if (testing) "Testing…" else "Test it now",
+                        enabled = !testing,
+                        onClick = {
+                            testing = true
+                            testResult = ""
+                            scope.launch {
+                                val outcome = GeminiTutor.generateReadingCheck(context, SAMPLE_PASSAGE)
+                                testResult = outcome.fold(
+                                    onSuccess = { "Working. It asked:\n\n${it.question}\n\nAnswer: ${it.correctAnswer}" },
+                                    onFailure = { "Failed: ${it.message}" },
+                                )
+                                testing = false
+                            }
+                        },
+                    )
+                    if (testResult.isNotBlank()) {
+                        Surface(
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                testResult,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(12.dp),
+                            )
+                        }
+                    }
                 }
             }
 
@@ -176,3 +216,15 @@ fun AiSettingsScreen(onBack: () -> Unit) {
         }
     }
 }
+
+/**
+ * A passage with enough going on to write a real comprehension question about - used only by the
+ * "Test it now" button, so the setup can be proved without first reading for several minutes.
+ */
+private const val SAMPLE_PASSAGE = """
+The lamplighter went along the street at dusk, tilting his pole to each wick in turn. He had walked
+the same route for thirty years, and knew which lamps guttered in a wind from the east. On those he
+lingered, sheltering the flame with his cap until it steadied. The boys who followed him for the
+first few corners never understood why he was slower at the corner of Mill Street, and he had long
+since stopped explaining it to them.
+"""

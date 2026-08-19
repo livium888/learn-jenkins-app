@@ -4,6 +4,17 @@ package com.flashcardreader.app.reader
 data class CreditTick(
     val creditedChunk: Int? = null,
     val creditedWords: Int = 0,
+    /**
+     * A page that has just been read properly, whether or not it earned anything.
+     *
+     * Separate from [creditedChunk] because "did you read this?" and "should this pay you?" are
+     * different questions. A page pays out once ever, so re-reading a chapter earns nothing - which
+     * is right for Focus Gate, where repeating a page would otherwise be a way to mint credit. But
+     * a comprehension check has nothing to farm: re-reading is still reading, and a question about
+     * it is still a fair question. Anything asking "what have they read lately" wants this one.
+     */
+    val readChunk: Int? = null,
+    val readWords: Int = 0,
     /** True when accrual is paused because nobody has touched the screen for a while. */
     val idle: Boolean = false,
 )
@@ -44,6 +55,12 @@ class ReadingCreditTracker(
 ) {
     private val dwellMs = HashMap<Int, Long>()
     private val credited = HashSet<Int>()
+
+    /**
+     * Pages read properly *this session*, including ones already paid for previously. Not persisted
+     * and not restored: a fresh sitting with a familiar book is still a sitting spent reading.
+     */
+    private val readThisSession = HashSet<Int>()
     private var lastInteractionAt = 0L
     private var bucketWords = 0f
 
@@ -77,16 +94,33 @@ class ReadingCreditTracker(
         val cap = capWpm.coerceAtLeast(1)
         bucketWords = (bucketWords + elapsedMs * cap / 60_000f).coerceAtMost(MAX_BUCKET_WORDS)
 
-        if (focusedChunk in credited || wordCount < MIN_WORDS) return CreditTick()
+        if (wordCount < MIN_WORDS) return CreditTick()
 
+        // Dwell is measured for every page, including ones already paid for. Skipping them meant a
+        // book you had read before produced no reading signal at all - the page was in `credited`,
+        // so the function returned before dwell was ever counted, and anything downstream of it
+        // (comprehension checks, the time-actually-read tally) saw a reader who never read a word.
         val accumulated = (dwellMs[focusedChunk] ?: 0L) + elapsedMs
         dwellMs[focusedChunk] = accumulated
         if (accumulated < requiredDwellMs(wordCount, cap)) return CreditTick()
-        if (bucketWords < wordCount) return CreditTick()
+
+        val firstReadThisSession = readThisSession.add(focusedChunk)
+        val read = if (firstReadThisSession) focusedChunk else null
+        val readWords = if (firstReadThisSession) wordCount else 0
+
+        // Paying out is the part that stays once-ever, and the part the rate cap governs.
+        if (focusedChunk in credited || bucketWords < wordCount) {
+            return CreditTick(readChunk = read, readWords = readWords)
+        }
 
         bucketWords -= wordCount
         credited.add(focusedChunk)
-        return CreditTick(creditedChunk = focusedChunk, creditedWords = wordCount)
+        return CreditTick(
+            creditedChunk = focusedChunk,
+            creditedWords = wordCount,
+            readChunk = read,
+            readWords = readWords,
+        )
     }
 
     /** The fastest this page could plausibly have been read, in ms. */

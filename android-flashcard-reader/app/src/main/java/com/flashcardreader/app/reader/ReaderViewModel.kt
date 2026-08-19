@@ -78,6 +78,8 @@ data class ReaderUiState(
     val pendingCheck: ReadingCheck? = null,
     /** True once enough verified reading has happened for [pendingCheck] to be asked. */
     val checkDue: Boolean = false,
+    /** Plain-language status of the reading checks, so a silent feature can be diagnosed. */
+    val checkStatus: String = "",
     /** Seconds of genuinely-read text banked this session, for the "open vs read" mirror. */
     val verifiedSeconds: Long = 0,
 )
@@ -324,21 +326,26 @@ class ReaderViewModel(
         if (result.idle != state.creditIdle) {
             _uiState.update { it.copy(creditIdle = result.idle) }
         }
-        val creditedChunk = result.creditedChunk ?: return
         val source = state.source ?: return
 
-        val earnedSeconds = ReadingCreditTracker.contentValueSeconds(result.creditedWords)
-        pendingReadSeconds += earnedSeconds
-        _uiState.update { it.copy(verifiedSeconds = it.verifiedSeconds + earnedSeconds) }
-
-        val credited = creditTracker.creditedChunks.toSet()
-        viewModelScope.launch {
-            if (focusPrefs.enabled) creditBank.earnFromReading(earnedSeconds)
-            libraryRepository.saveCreditedChunks(source, credited)
+        // Paying out and having read are now separate: a re-read page still counts as reading even
+        // though it can never earn twice. The checks follow "read", the credit bank follows "paid".
+        if (result.creditedChunk != null) {
+            val earnedSeconds = ReadingCreditTracker.contentValueSeconds(result.creditedWords)
+            val credited = creditTracker.creditedChunks.toSet()
+            viewModelScope.launch {
+                if (focusPrefs.enabled) creditBank.earnFromReading(earnedSeconds)
+                libraryRepository.saveCreditedChunks(source, credited)
+            }
         }
 
-        chunksSinceCheck.add(creditedChunk)
-        wordsSinceCheck += result.creditedWords
+        val readChunk = result.readChunk ?: return
+        val readSeconds = ReadingCreditTracker.contentValueSeconds(result.readWords)
+        pendingReadSeconds += readSeconds
+        _uiState.update { it.copy(verifiedSeconds = it.verifiedSeconds + readSeconds) }
+
+        chunksSinceCheck.add(readChunk)
+        wordsSinceCheck += result.readWords
         maybePrepareReadingCheck()
         // Crossing the threshold has to be a state change, not something the UI asks about. A
         // plain field would be read once when the question arrived - three quarters of the way
@@ -358,17 +365,75 @@ class ReaderViewModel(
      */
     private fun maybePrepareReadingCheck() {
         if (generatedForWindow || checkJob?.isActive == true) return
-        if (!aiPrefs.checksReadyFor(sourceId)) return
+        if (!aiPrefs.readingChecks) return
+        // Say why nothing is happening. A feature that stays silent when misconfigured is
+        // indistinguishable from one that is broken, and there is no way for anyone to tell which.
+        if (!aiPrefs.isReady) {
+            setCheckStatus(
+                if (aiPrefs.apiKey.isBlank()) {
+                    "Reading checks need a Gemini API key in AI tutor settings."
+                } else {
+                    "Reading checks need the AI tutor switched on as well."
+                },
+            )
+            return
+        }
+        if (sourceId in aiPrefs.excludedSources) {
+            setCheckStatus("Reading checks are switched off for this book.")
+            return
+        }
         if (wordsSinceCheck < checkThresholdWords * PREPARE_FRACTION) return
 
         generatedForWindow = true
         val passage = passageSinceLastCheck()
         val offset = _uiState.value.chunks.getOrNull(chunksSinceCheck.firstOrNull() ?: 0)?.startChar ?: 0
         checkJob = viewModelScope.launch {
-            val check = GeminiTutor.generateReadingCheck(context, passage).getOrNull() ?: return@launch
+            val result = GeminiTutor.generateReadingCheck(context, passage)
+            val check = result.getOrNull()
+            if (check == null) {
+                // One failure used to disable checks for the whole session, because this flag was
+                // set on the way in and only ever cleared by answering a question that never came.
+                generatedForWindow = false
+                setCheckStatus(
+                    "Couldn't write a question: " +
+                        (result.exceptionOrNull()?.message ?: "the AI didn't answer").take(160),
+                )
+                return@launch
+            }
             pendingCheckId = runCatching { readingCheckRepository.save(check, sourceId, offset) }.getOrNull()
-            _uiState.update { it.copy(pendingCheck = check) }
+            _uiState.update { it.copy(pendingCheck = check, checkStatus = "") }
         }
+    }
+
+    /** Shows a one-off note about the checks, without nagging on every single tick. */
+    private fun setCheckStatus(message: String) {
+        if (_uiState.value.checkStatus == message) return
+        _uiState.update { it.copy(checkStatus = message) }
+    }
+
+    fun dismissCheckStatus() {
+        _uiState.update { it.copy(checkStatus = "") }
+    }
+
+    /**
+     * A plain-language account of why a question has or hasn't appeared. This exists for the same
+     * reason the book-source report does: nothing here can reach the Gemini API, so without the
+     * app saying what it is doing, "no question appeared" has a dozen indistinguishable causes.
+     */
+    fun readingCheckReport(): String = buildString {
+        appendLine("Reading checks")
+        appendLine("  switched on: ${aiPrefs.readingChecks}")
+        appendLine("  AI tutor on: ${aiPrefs.enabled}")
+        appendLine("  API key set: ${aiPrefs.apiKey.isNotBlank()}")
+        appendLine("  model: ${aiPrefs.model}")
+        appendLine("  this book excluded: ${sourceId in aiPrefs.excludedSources}")
+        appendLine("  interval: ${aiPrefs.readingCheckMinutes} min = $checkThresholdWords words")
+        appendLine("  words read since last check: $wordsSinceCheck")
+        appendLine("  pages read this stretch: ${chunksSinceCheck.size}")
+        appendLine("  question ready: ${_uiState.value.pendingCheck != null}")
+        appendLine("  question due: ${_uiState.value.checkDue}")
+        val status = _uiState.value.checkStatus
+        if (status.isNotBlank()) appendLine("  last problem: $status")
     }
 
     /**

@@ -374,6 +374,7 @@ fun ReaderScreen(
             onChange = viewModel::updateTypography,
             onDismiss = { showSettings = false },
             sourceId = state.source?.id ?: 0L,
+            readingCheckReport = viewModel::readingCheckReport,
         )
     }
 
