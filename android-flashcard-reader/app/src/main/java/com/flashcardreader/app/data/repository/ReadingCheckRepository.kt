@@ -15,6 +15,9 @@ import kotlinx.coroutines.flow.Flow
  * is the whole reason these are multiple choice - a tap on the correct option is evidence, whereas
  * tapping "I knew that" is just a claim.
  */
+/** Progress-screen totals for the comprehension questions. */
+data class ReadingCheckCounts(val due: Int = 0, val answered: Int = 0, val remembered: Int = 0)
+
 class ReadingCheckRepository(
     private val dao: ReadingCheckDao,
     private val fsrs: Fsrs = Fsrs(),
@@ -39,6 +42,13 @@ class ReadingCheckRepository(
     suspend fun byId(id: Long): ReadingCheckCard? = dao.byId(id)
 
     fun observeCount(): Flow<Int> = dao.observeCount()
+
+    /** Counts for the Progress screen: written, due now, answered, and answered without a miss. */
+    suspend fun counts(now: Long = System.currentTimeMillis()) = ReadingCheckCounts(
+        due = dao.dueCount(now),
+        answered = dao.answeredCount(),
+        remembered = dao.rememberedCount(),
+    )
 
     suspend fun forSource(sourceId: Long): List<ReadingCheckCard> = dao.forSource(sourceId)
 

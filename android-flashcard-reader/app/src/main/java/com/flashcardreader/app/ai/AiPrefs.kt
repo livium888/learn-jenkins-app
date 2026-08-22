@@ -26,9 +26,18 @@ class AiPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_ENABLED, value).apply()
 
+    /**
+     * The Gemini API key, with every space stripped on the way in and out.
+     *
+     * Pasting a key on a phone very easily brings a trailing space or newline with it, and the
+     * whole key then travelled in a URL query string where that whitespace corrupted the request -
+     * Google saw no credential at all and answered 401 "Expected OAuth 2 access token", which reads
+     * like the key is wrong when in fact it never arrived. Keys contain no whitespace, so removing
+     * it can never damage a real one, and cleaning on read repairs a key already stored badly.
+     */
     var apiKey: String
-        get() = prefs.getString(KEY_API, "").orEmpty()
-        set(value) = prefs.edit().putString(KEY_API, value).apply()
+        get() = prefs.getString(KEY_API, "").orEmpty().filterNot { it.isWhitespace() }
+        set(value) = prefs.edit().putString(KEY_API, value.filterNot { it.isWhitespace() }).apply()
 
     var model: String
         get() = prefs.getString(KEY_MODEL, DEFAULT_MODEL)!!.ifBlank { DEFAULT_MODEL }

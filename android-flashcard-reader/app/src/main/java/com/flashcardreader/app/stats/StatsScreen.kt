@@ -108,6 +108,24 @@ fun StatsScreen(
             // apart. Seeing the gap is a cheaper corrective than any prompt.
             ReadingAttentionCard()
 
+            // Proof the comprehension questions are being kept and scheduled, not just asked once
+            // and thrown away - which is impossible to tell from the reader alone.
+            if (stats.readingChecks > 0) {
+                SectionCard {
+                    SectionTitle("Reading questions")
+                    StatRow("Written from your reading", stats.readingChecks.toString())
+                    StatRow("Due now", stats.readingChecksDue.toString())
+                    StatRow("Answered", stats.readingChecksAnswered.toString())
+                    StatRow("Never missed", stats.readingChecksRemembered.toString())
+                    Text(
+                        "Each one is scheduled by the same algorithm as your words, so it comes back " +
+                            "when you are about to forget it rather than on a fixed timetable.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             SectionCard {
                 SectionTitle("Maturity")
                 StatRow("New", stats.newCount.toString())

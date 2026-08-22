@@ -34,9 +34,9 @@ fun ReviewScreen(viewModel: ReviewViewModel, onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // Words first, then the comprehension questions: a due word is a smaller ask, and
-                // clearing them keeps the longer questions from being the wall you hit on opening.
-                current == null && currentCheck != null -> ReadingCheckDialog(
+                // Mixed in among the words rather than queued behind them, so a backlog of due
+                // vocabulary can never bury the reading questions completely.
+                currentCheck != null && (state.showCheckNext || current == null) -> ReadingCheckDialog(
                     check = ReadingCheck(
                         question = currentCheck.question,
                         correctAnswer = currentCheck.correctAnswer,
@@ -45,6 +45,7 @@ fun ReviewScreen(viewModel: ReviewViewModel, onBack: () -> Unit) {
                     ),
                     onAnswered = viewModel::answerCurrentCheck,
                     onSkip = viewModel::skipCurrentCheck,
+                    remaining = state.queue.size + state.checkQueue.size,
                 )
                 current == null -> Text(
                     "Nothing due right now — nice work.",

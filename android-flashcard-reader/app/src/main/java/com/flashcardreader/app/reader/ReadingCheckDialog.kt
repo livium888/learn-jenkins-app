@@ -43,6 +43,8 @@ fun ReadingCheckDialog(
     check: ReadingCheck,
     onAnswered: (Boolean) -> Unit,
     onSkip: () -> Unit,
+    /** How many cards are left in the review queue, when shown from there. */
+    remaining: Int? = null,
 ) {
     // Shuffled once per showing, so position never gives the answer away and never moves under a
     // finger mid-tap.
@@ -52,11 +54,21 @@ fun ReadingCheckDialog(
     val correct = chosen == check.correctAnswer
 
     AppDialog(onDismiss = onSkip, dismissible = !answered) {
-        Text(
-            "WHAT YOU JUST READ",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (remaining == null) "WHAT YOU JUST READ" else "FROM YOUR READING",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (remaining != null) {
+                Text(
+                    "$remaining left",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Text(check.question, style = MaterialTheme.typography.titleMedium)
 
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.tight)) {

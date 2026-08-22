@@ -6,8 +6,11 @@ import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.repository.CalibrationLevel
 import com.flashcardreader.app.data.repository.CalibrationStore
+import com.flashcardreader.app.data.repository.ReadingCheckCounts
+import com.flashcardreader.app.data.repository.ReadingCheckRepository
 import com.flashcardreader.app.data.repository.TermRepository
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -32,16 +35,35 @@ data class Stats(
     /** Calibration: recall accuracy per confidence level (from CalibrationStore). */
     val calibration: List<CalibrationLevel> = emptyList(),
     val calibrationNote: String? = null,
+    /** Comprehension questions written from your reading: total, due now, answered, still perfect. */
+    val readingChecks: Int = 0,
+    val readingChecksDue: Int = 0,
+    val readingChecksAnswered: Int = 0,
+    val readingChecksRemembered: Int = 0,
 )
 
 class StatsViewModel(
     private val termRepository: TermRepository,
     private val calibration: CalibrationStore,
+    private val readingChecks: ReadingCheckRepository,
 ) : ViewModel() {
-    val stats: StateFlow<Stats> = termRepository.observeAll()
-        .map { terms ->
+    // Combined so the comprehension questions refresh with everything else - a count that only
+    // updated when a *word* changed would go stale exactly when someone came to check it.
+    val stats: StateFlow<Stats> = combine(
+        termRepository.observeAll(),
+        readingChecks.observeCount(),
+    ) { terms, checkCount -> terms to checkCount }
+        .map { (terms, checkCount) ->
             val snapshot = calibration.snapshot()
-            computeStats(terms).copy(calibration = snapshot.levels, calibrationNote = snapshot.note)
+            val counts = runCatching { readingChecks.counts() }.getOrDefault(ReadingCheckCounts())
+            computeStats(terms).copy(
+                calibration = snapshot.levels,
+                calibrationNote = snapshot.note,
+                readingChecks = checkCount,
+                readingChecksDue = counts.due,
+                readingChecksAnswered = counts.answered,
+                readingChecksRemembered = counts.remembered,
+            )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Stats())
 

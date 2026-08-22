@@ -33,8 +33,15 @@ interface ReadingCheckDao {
     @Query("SELECT COUNT(*) FROM reading_checks")
     fun observeCount(): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM reading_checks WHERE state != 'NEW' AND lapses = 0")
+    @Query("SELECT COUNT(*) FROM reading_checks WHERE due IS NULL OR due <= :now")
+    suspend fun dueCount(now: Long): Int
+
+    /** Answered at least once and never missed - the ones that have actually stuck. */
+    @Query("SELECT COUNT(*) FROM reading_checks WHERE reps > 0 AND lapses = 0")
     suspend fun rememberedCount(): Int
+
+    @Query("SELECT COUNT(*) FROM reading_checks WHERE reps > 0")
+    suspend fun answeredCount(): Int
 
     /** Cleans up with the book, so deleting a source doesn't leave its questions behind. */
     @Query("DELETE FROM reading_checks WHERE sourceId = :sourceId")

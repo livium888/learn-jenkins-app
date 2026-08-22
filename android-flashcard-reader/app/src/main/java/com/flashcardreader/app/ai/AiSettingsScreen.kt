@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -139,11 +141,30 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                             testing = true
                             testResult = ""
                             scope.launch {
-                                val outcome = GeminiTutor.generateReadingCheck(context, SAMPLE_PASSAGE)
-                                testResult = outcome.fold(
-                                    onSuccess = { "Working. It asked:\n\n${it.question}\n\nAnswer: ${it.correctAnswer}" },
-                                    onFailure = { "Failed: ${it.message}" },
+                                // Check the key first and separately. A failure here is about the
+                                // key; a failure afterwards is about the model or the question -
+                                // and telling those apart is most of the diagnosis.
+                                val models = withContext(Dispatchers.IO) {
+                                    GeminiTutor.fetchModels(prefs.apiKey)
+                                }
+                                testResult = models.fold(
+                                    onSuccess = { names ->
+                                        val outcome = GeminiTutor.generateReadingCheck(context, SAMPLE_PASSAGE)
+                                        outcome.fold(
+                                            onSuccess = {
+                                                "Working, using ${prefs.model}.\n\nIt asked:\n${it.question}" +
+                                                    "\n\nAnswer: ${it.correctAnswer}"
+                                            },
+                                            onFailure = { error ->
+                                                "Key is fine (${names.size} models available), but the " +
+                                                    "question failed:\n${error.message}\n\nModels this key can use:\n" +
+                                                    names.take(12).joinToString("\n")
+                                            },
+                                        )
+                                    },
+                                    onFailure = { "The key itself was rejected:\n${it.message}" },
                                 )
+                                model = prefs.model
                                 testing = false
                             }
                         },
