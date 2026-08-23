@@ -30,7 +30,43 @@ data class ReadingCheck(
          */
         fun parse(reply: String, passage: String): ReadingCheck? {
             val json = extractJson(reply) ?: return null
+            return parseOne(json, passage)
+        }
 
+        /**
+         * Parses a reply that may carry several questions - one per distinct idea the model found
+         * in the passage.
+         *
+         * Each is validated on its own and a bad one is dropped rather than sinking the batch: if
+         * three questions come back and one cites evidence that isn't in the text, the other two
+         * are still worth asking. Duplicates are dropped too, on both the question and the quoted
+         * evidence, because "two key ideas" that cite the same sentence is one idea asked twice.
+         *
+         * A reply in the old single-question shape still parses, as one question.
+         */
+        fun parseAll(reply: String, passage: String, limit: Int = MAX_QUESTIONS): List<ReadingCheck> {
+            val json = extractJson(reply) ?: return emptyList()
+            val array = json.optJSONArray("questions")
+                ?: return listOfNotNull(parseOne(json, passage)).take(limit)
+
+            val checks = mutableListOf<ReadingCheck>()
+            val seenQuestions = mutableSetOf<String>()
+            val seenEvidence = mutableSetOf<String>()
+            for (i in 0 until array.length()) {
+                if (checks.size >= limit) break
+                val item = array.optJSONObject(i) ?: continue
+                val check = parseOne(item, passage) ?: continue
+                if (!seenQuestions.add(normalize(check.question))) continue
+                if (!seenEvidence.add(normalize(check.evidence))) continue
+                checks.add(check)
+            }
+            return checks
+        }
+
+        /** The most questions worth asking about one stretch of reading. */
+        const val MAX_QUESTIONS = 3
+
+        private fun parseOne(json: JSONObject, passage: String): ReadingCheck? {
             val question = json.optString("question").trim()
             val answer = json.optString("answer").trim()
             val evidence = json.optString("evidence").trim()

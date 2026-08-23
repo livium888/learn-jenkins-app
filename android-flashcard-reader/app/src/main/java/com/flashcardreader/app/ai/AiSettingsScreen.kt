@@ -149,11 +149,22 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                                 }
                                 testResult = models.fold(
                                     onSuccess = { names ->
-                                        val outcome = GeminiTutor.generateReadingCheck(context, SAMPLE_PASSAGE)
+                                        val outcome = GeminiTutor.generateReadingChecks(context, SAMPLE_PASSAGE)
                                         outcome.fold(
-                                            onSuccess = {
-                                                "Working, using ${prefs.model}.\n\nIt asked:\n${it.question}" +
-                                                    "\n\nAnswer: ${it.correctAnswer}"
+                                            onSuccess = { checks ->
+                                                // Every question is shown, not just the first: the
+                                                // test is now partly "does it find more than one
+                                                // idea in a passage", and one line would hide that.
+                                                buildString {
+                                                    append("Working, using ${prefs.model}.")
+                                                    append("\n\nIt asked ${checks.size} question")
+                                                    if (checks.size != 1) append("s")
+                                                    append(":")
+                                                    checks.forEach { check ->
+                                                        append("\n\n${check.question}")
+                                                        append("\nAnswer: ${check.correctAnswer}")
+                                                    }
+                                                }
                                             },
                                             onFailure = { error ->
                                                 "Key is fine (${names.size} models available), but the " +

@@ -49,6 +49,9 @@ fun ReadingCheckDialog(
     remaining: Int? = null,
     /** Throws the question away as a bad one. Absent where there is nothing to throw away. */
     onReject: (() -> Unit)? = null,
+    /** Which question of a batch this is, 1-based. Null when it is the only one. */
+    position: Int? = null,
+    total: Int = 1,
 ) {
     // Shuffled once per showing, so position never gives the answer away and never moves under a
     // finger mid-tap.
@@ -66,6 +69,8 @@ fun ReadingCheckDialog(
             onContinue = { onAnswered(chosen == check.correctAnswer) },
             onSkip = onSkip,
             onReject = onReject,
+            position = position,
+            total = total,
         )
     }
 }
@@ -87,6 +92,8 @@ internal fun ColumnScope.ReadingCheckBody(
     onContinue: () -> Unit,
     onSkip: () -> Unit,
     onReject: (() -> Unit)? = null,
+    position: Int? = null,
+    total: Int = 1,
 ) {
     val answered = chosen != null
     val correct = chosen == check.correctAnswer
@@ -98,9 +105,16 @@ internal fun ColumnScope.ReadingCheckBody(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
-        if (remaining != null) {
+        // A batch says how far through it you are, so three questions in a row read as one
+        // interruption with an end in sight rather than an open-ended quiz.
+        val counter = when {
+            position != null -> "$position of $total"
+            remaining != null -> "$remaining left"
+            else -> null
+        }
+        if (counter != null) {
             Text(
-                "$remaining left",
+                counter,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -148,7 +162,12 @@ internal fun ColumnScope.ReadingCheckBody(
                 )
             }
         }
-        PrimaryButton(text = "Keep reading", onClick = onContinue)
+        // "Next question" while a batch is still running: "Keep reading" would be a lie, and
+        // being told you can go back to the book and then not going back is worse than either.
+        PrimaryButton(
+            text = if (position != null && position < total) "Next question" else "Keep reading",
+            onClick = onContinue,
+        )
         // Only offered once the answer has been revealed. Before that there is nothing to judge,
         // and a reject button would just be a second way to skip a question you found hard.
         if (onReject != null) {

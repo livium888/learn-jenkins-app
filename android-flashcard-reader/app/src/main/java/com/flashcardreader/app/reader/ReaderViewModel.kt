@@ -75,9 +75,14 @@ data class ReaderUiState(
     val loading: Boolean = true,
     /** True when Focus Gate accrual has paused because nobody has touched the screen for a while. */
     val creditIdle: Boolean = false,
-    /** A question about the passage just read, waiting to be asked. Null when there isn't one. */
-    val pendingCheck: ReadingCheck? = null,
-    /** True once enough verified reading has happened for [pendingCheck] to be asked. */
+    /**
+     * Questions about the passage just read, waiting to be asked - one per idea the AI found in
+     * it. Empty when there are none.
+     */
+    val pendingChecks: List<ReadingCheck> = emptyList(),
+    /** Which of [pendingChecks] is on screen. */
+    val checkIndex: Int = 0,
+    /** True once enough verified reading has happened for [pendingChecks] to be asked. */
     val checkDue: Boolean = false,
     /** Plain-language status of the reading checks, so a silent feature can be diagnosed. */
     val checkStatus: String = "",
@@ -143,7 +148,7 @@ class ReaderViewModel(
     private var generatedForWindow = false
 
     /** Row id of the question currently on offer, so answering it doesn't have to search for it. */
-    private var pendingCheckId: Long? = null
+    private var pendingCheckIds: List<Long?> = emptyList()
 
     /**
      * Questions from earlier in *this* book that have come due again.
@@ -397,15 +402,18 @@ class ReaderViewModel(
         // before the key is, because re-asking an existing question needs no key at all.
         dueFromThisBook.removeFirstOrNull()?.let { revisit ->
             generatedForWindow = true
-            pendingCheckId = revisit.id
+            pendingCheckIds = listOf(revisit.id)
             _uiState.update {
                 it.copy(
-                    pendingCheck = ReadingCheck(
-                        question = revisit.question,
-                        correctAnswer = revisit.correctAnswer,
-                        distractors = revisit.wrongOptions,
-                        evidence = revisit.evidence,
+                    pendingChecks = listOf(
+                        ReadingCheck(
+                            question = revisit.question,
+                            correctAnswer = revisit.correctAnswer,
+                            distractors = revisit.wrongOptions,
+                            evidence = revisit.evidence,
+                        ),
                     ),
+                    checkIndex = 0,
                     checkStatus = "",
                 )
             }
@@ -428,9 +436,9 @@ class ReaderViewModel(
         val passage = passageSinceLastCheck()
         val offset = _uiState.value.chunks.getOrNull(chunksSinceCheck.firstOrNull() ?: 0)?.startChar ?: 0
         checkJob = viewModelScope.launch {
-            val result = GeminiTutor.generateReadingCheck(context, passage)
-            val check = result.getOrNull()
-            if (check == null) {
+            val result = GeminiTutor.generateReadingChecks(context, passage)
+            val checks = result.getOrNull().orEmpty()
+            if (checks.isEmpty()) {
                 // One failure used to disable checks for the whole session, because this flag was
                 // set on the way in and only ever cleared by answering a question that never came.
                 generatedForWindow = false
@@ -440,8 +448,12 @@ class ReaderViewModel(
                 )
                 return@launch
             }
-            pendingCheckId = runCatching { readingCheckRepository.save(check, sourceId, offset) }.getOrNull()
-            _uiState.update { it.copy(pendingCheck = check, checkStatus = "") }
+            // Saved before being asked, so every question is kept and scheduled even if this
+            // batch is skipped - the point is that they come back, not that they are answered now.
+            pendingCheckIds = checks.map {
+                runCatching { readingCheckRepository.save(it, sourceId, offset) }.getOrNull()
+            }
+            _uiState.update { it.copy(pendingChecks = checks, checkIndex = 0, checkStatus = "") }
         }
     }
 
@@ -470,7 +482,7 @@ class ReaderViewModel(
         appendLine("  interval: ${aiPrefs.readingCheckMinutes} min = $checkThresholdWords words")
         appendLine("  words read since last check: $wordsSinceCheck")
         appendLine("  pages read this stretch: ${chunksSinceCheck.size}")
-        appendLine("  question ready: ${_uiState.value.pendingCheck != null}")
+        appendLine("  questions ready: ${_uiState.value.pendingChecks.size}")
         appendLine("  question due: ${_uiState.value.checkDue}")
         val status = _uiState.value.checkStatus
         if (status.isNotBlank()) appendLine("  last problem: $status")
@@ -491,10 +503,21 @@ class ReaderViewModel(
             .take(MAX_PASSAGE_CHARS)
     }
 
-    /** Records the answer, reschedules the card, and opens the window for the next stretch. */
+    /**
+     * Records the answer and moves to the next question in the batch, or back to the book.
+     *
+     * The window only reopens once the last one is done, so a batch counts as a single
+     * interruption rather than resetting the clock after each question.
+     */
     fun onReadingCheckAnswered(correct: Boolean) {
-        val cardId = pendingCheckId
-        clearCheckWindow()
+        val state = _uiState.value
+        val cardId = pendingCheckIds.getOrNull(state.checkIndex)
+        val more = state.checkIndex + 1 < state.pendingChecks.size
+        if (more) {
+            _uiState.update { it.copy(checkIndex = it.checkIndex + 1) }
+        } else {
+            clearCheckWindow()
+        }
         if (cardId == null) return
         viewModelScope.launch {
             val card = readingCheckRepository.byId(cardId) ?: return@launch
@@ -509,19 +532,31 @@ class ReaderViewModel(
      * wrong or unanswerable gets asked repeatedly, which is worse than not asking at all.
      */
     fun rejectReadingCheck() {
-        val check = _uiState.value.pendingCheck
-        val cardId = pendingCheckId
-        clearCheckWindow()
-        if (check == null) return
+        val state = _uiState.value
+        val check = state.pendingChecks.getOrNull(state.checkIndex) ?: return
+        val cardId = pendingCheckIds.getOrNull(state.checkIndex)
+        val book = state.source?.title.orEmpty()
+        // Only this question goes; the others in the batch were about different ideas and may be
+        // perfectly good.
+        val more = state.checkIndex + 1 < state.pendingChecks.size
+        if (more) {
+            _uiState.update { it.copy(checkIndex = it.checkIndex + 1) }
+        } else {
+            clearCheckWindow()
+        }
         viewModelScope.launch {
-            feedback?.record(check, book = _uiState.value.source?.title.orEmpty())
+            feedback?.record(check, book = book)
             if (cardId != null) {
                 readingCheckRepository.byId(cardId)?.let { readingCheckRepository.discard(it) }
             }
         }
     }
 
-    /** Dismissed without answering. The question is kept - it is still due on the review screen. */
+    /**
+     * Dismissed without answering. Skips the whole batch, not just the question on screen: someone
+     * who wants to get back to the book should not have to skip three times. The questions are all
+     * kept and stay due on the review screen.
+     */
     fun dismissReadingCheck() {
         onReadingInteraction()
         clearCheckWindow()
@@ -531,8 +566,8 @@ class ReaderViewModel(
         wordsSinceCheck = 0
         chunksSinceCheck.clear()
         generatedForWindow = false
-        pendingCheckId = null
-        _uiState.update { it.copy(pendingCheck = null, checkDue = false) }
+        pendingCheckIds = emptyList()
+        _uiState.update { it.copy(pendingChecks = emptyList(), checkIndex = 0, checkDue = false) }
     }
 
     /**

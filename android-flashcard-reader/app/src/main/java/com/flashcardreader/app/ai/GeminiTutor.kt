@@ -45,10 +45,10 @@ object GeminiTutor {
      * feature is off by default and has its own switch: unlike the word tutor, which sends a single
      * word and sentence on an explicit tap, this uploads pages of a book automatically.
      */
-    suspend fun generateReadingCheck(
+    suspend fun generateReadingChecks(
         context: Context,
         passage: String,
-    ): Result<ReadingCheck> = withContext(Dispatchers.IO) {
+    ): Result<List<ReadingCheck>> = withContext(Dispatchers.IO) {
         val prefs = AiPrefs(context)
         val key = prefs.apiKey
         if (key.isBlank()) {
@@ -59,11 +59,21 @@ object GeminiTutor {
             return@withContext Result.failure(IllegalStateException("Not enough read text to ask about yet."))
         }
 
+        // Scaled to the passage rather than fixed: a short stretch rarely holds three separate
+        // ideas, and asking three about it produces two questions padded out of one. The model is
+        // told this is a ceiling, not a quota - fewer real ideas should mean fewer questions.
+        val ceiling = questionCeiling(trimmed)
+
         val prompt = buildString {
             appendLine("You are helping someone check they understood what they just read.")
             appendLine()
-            appendLine("Write ONE multiple-choice question about the passage below.")
+            appendLine("Find the distinct key ideas in the passage below - the things someone would")
+            appendLine("have had to follow to have understood it - and write ONE multiple-choice")
+            appendLine("question about each.")
             appendLine("Rules:")
+            appendLine("- At most $ceiling questions. This is a ceiling, not a target: if the passage")
+            appendLine("  carries only one real idea, return exactly one question. Never pad.")
+            appendLine("- Each question must be about a DIFFERENT idea, and cite different lines.")
             appendLine("- Ask about meaning, cause, motive or consequence - never trivia like a name, a date or a colour.")
             appendLine("- Someone who read and understood the passage should answer it easily; someone who skimmed should not.")
             appendLine("- The question must be answerable from the passage alone.")
@@ -72,16 +82,29 @@ object GeminiTutor {
             appendLine("- Write in ${prefs.myLanguage}.")
             appendLine()
             appendLine("Reply with JSON only, no other text, in exactly this shape:")
-            appendLine("""{"question":"...","answer":"...","distractors":["...","...","..."],"evidence":"..."}""")
+            appendLine("""{"questions":[{"question":"...","answer":"...","distractors":["...","...","..."],"evidence":"..."}]}""")
             appendLine()
             appendLine("PASSAGE:")
             appendLine(trimmed)
         }
 
         askWithWorkingModel(prefs, key, prompt, READING_CHECK_SCHEMA).mapCatching { reply ->
-            ReadingCheck.parse(reply, trimmed)
-                ?: error("The AI answered, but its question didn't check out (bad JSON, wrong number of options, or evidence that isn't in the passage).")
+            ReadingCheck.parseAll(reply, trimmed, ceiling).ifEmpty {
+                error("The AI answered, but none of its questions checked out (bad JSON, wrong number of options, or evidence that isn't in the passage).")
+            }
         }
+    }
+
+    /**
+     * How many questions to allow for a passage of this length.
+     *
+     * One per [WORDS_PER_QUESTION] words, capped. The cap is the important half: this is an
+     * interruption to someone's reading, and the risk the whole feature runs is turning a book
+     * into a quiz. Three is already a lot to answer before carrying on.
+     */
+    internal fun questionCeiling(passage: String): Int {
+        val words = passage.split(Regex("\\s+")).count { it.isNotBlank() }
+        return (words / WORDS_PER_QUESTION + 1).coerceIn(1, ReadingCheck.MAX_QUESTIONS)
     }
 
     /**
@@ -225,24 +248,45 @@ object GeminiTutor {
     /** Below this there isn't enough read text for a question worth asking. */
     private const val MIN_PASSAGE_CHARS = 400
 
+    /**
+     * Reading per question allowed.
+     *
+     * Set so the default four-minute stretch (about 960 words at the tracker's assumed pace) comes
+     * out at two rather than three. Three should be what a deliberately long stretch earns, not
+     * what every ordinary one does.
+     */
+    private const val WORDS_PER_QUESTION = 500
+
     /** The exact shape a reading check must come back in - enforced by the API, not just asked for. */
     private val READING_CHECK_SCHEMA: JSONObject
-        get() = JSONObject()
-            .put("type", "OBJECT")
-            .put(
-                "properties",
-                JSONObject()
-                    .put("question", JSONObject().put("type", "STRING"))
-                    .put("answer", JSONObject().put("type", "STRING"))
-                    .put(
-                        "distractors",
-                        JSONObject()
-                            .put("type", "ARRAY")
-                            .put("items", JSONObject().put("type", "STRING")),
-                    )
-                    .put("evidence", JSONObject().put("type", "STRING")),
-            )
-            .put("required", JSONArray().put("question").put("answer").put("distractors").put("evidence"))
+        get() {
+            val question = JSONObject()
+                .put("type", "OBJECT")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("question", JSONObject().put("type", "STRING"))
+                        .put("answer", JSONObject().put("type", "STRING"))
+                        .put(
+                            "distractors",
+                            JSONObject()
+                                .put("type", "ARRAY")
+                                .put("items", JSONObject().put("type", "STRING")),
+                        )
+                        .put("evidence", JSONObject().put("type", "STRING")),
+                )
+                .put("required", JSONArray().put("question").put("answer").put("distractors").put("evidence"))
+            return JSONObject()
+                .put("type", "OBJECT")
+                .put(
+                    "properties",
+                    JSONObject().put(
+                        "questions",
+                        JSONObject().put("type", "ARRAY").put("items", question),
+                    ),
+                )
+                .put("required", JSONArray().put("questions"))
+        }
 
     private fun parseAnswer(payload: String): String {
         val candidates = JSONObject(payload).optJSONArray("candidates")

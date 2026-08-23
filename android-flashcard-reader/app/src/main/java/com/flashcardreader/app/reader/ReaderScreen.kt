@@ -274,7 +274,7 @@ fun ReaderScreen(
                         // must explicitly stop accrual - as must split-screen beside the blocked app.
                         val covered = live.pendingFlashcards.isNotEmpty() ||
                             live.pendingComprehension ||
-                            live.pendingCheck != null ||
+                            live.pendingChecks.isNotEmpty() ||
                             activity?.isInMultiWindowMode == true
                         viewModel.onReadingTick(
                             focusedChunk = if (covered) -1 else centreChunkIndex(listState),
@@ -357,13 +357,16 @@ fun ReaderScreen(
 
     // An AI question about the passage just read takes precedence over the generic recall prompt:
     // it asks about the actual text, so the generic one would only be a weaker duplicate.
-    val readingCheck = state.pendingCheck
+    val readingCheck = state.pendingChecks.getOrNull(state.checkIndex)
     if (readingCheck != null && state.checkDue && state.pendingFlashcards.isEmpty()) {
         ReadingCheckDialog(
             check = readingCheck,
             onAnswered = viewModel::onReadingCheckAnswered,
             onSkip = viewModel::dismissReadingCheck,
             onReject = viewModel::rejectReadingCheck,
+            // Only labelled when there is more than one, so a single question stays unadorned.
+            position = if (state.pendingChecks.size > 1) state.checkIndex + 1 else null,
+            total = state.pendingChecks.size,
         )
     } else if (state.pendingComprehension && state.pendingFlashcards.isEmpty()) {
         ComprehensionDialog(onDone = viewModel::dismissComprehension)

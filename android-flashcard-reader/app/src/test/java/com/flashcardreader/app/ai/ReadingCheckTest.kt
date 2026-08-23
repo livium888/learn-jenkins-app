@@ -109,3 +109,97 @@ class ReadingCheckTest {
         assertTrue(!ReadingCheck.appearsIn("He had walked the same route", ""))
     }
 }
+
+/**
+ * A passage usually carries more than one idea, so the model is now asked for one question per
+ * idea. That turns a single all-or-nothing validation into a batch, and the batch has its own ways
+ * of going wrong: one bad question sinking three good ones, or "three ideas" that are the same
+ * idea asked three times.
+ */
+class ReadingCheckBatchTest {
+
+    private val passage = """
+        The lamplighter went along the street at dusk, tilting his pole to each wick in turn.
+        He had walked the same route for thirty years, and knew which lamps guttered in a wind
+        from the east. The boys followed him for the first few corners, then lost interest.
+    """.trimIndent()
+
+    private fun question(
+        q: String,
+        answer: String,
+        evidence: String,
+        distractors: String = """["One","Two","Three"]""",
+    ) = """{"question":"$q","answer":"$answer","distractors":$distractors,"evidence":"$evidence"}"""
+
+    private val routeEvidence = "He had walked the same route for thirty years"
+    private val boysEvidence = "The boys followed him for the first few corners, then lost interest"
+
+    @Test
+    fun `takes every valid question in a batch`() {
+        val reply = """{"questions":[
+            ${question("Why did he know the lamps?", "Thirty years on the route", routeEvidence)},
+            ${question("What did the boys do?", "They lost interest", boysEvidence)}
+        ]}"""
+        val checks = ReadingCheck.parseAll(reply, passage)
+        assertEquals(2, checks.size)
+        assertEquals("Thirty years on the route", checks[0].correctAnswer)
+        assertEquals("They lost interest", checks[1].correctAnswer)
+    }
+
+    @Test
+    fun `one bad question does not sink the good ones`() {
+        // The middle question cites something the passage never said - the exact failure the whole
+        // validation exists for. It must go, and the other two must survive.
+        val reply = """{"questions":[
+            ${question("Why did he know the lamps?", "Thirty years", routeEvidence)},
+            ${question("What colour was his coat?", "Green", "His coat was a deep bottle green")},
+            ${question("What did the boys do?", "They lost interest", boysEvidence)}
+        ]}"""
+        val checks = ReadingCheck.parseAll(reply, passage)
+        assertEquals(2, checks.size)
+        assertTrue(checks.none { it.correctAnswer == "Green" })
+    }
+
+    @Test
+    fun `two questions citing the same lines count as one idea`() {
+        val reply = """{"questions":[
+            ${question("Why did he know the lamps?", "Thirty years", routeEvidence)},
+            ${question("How long had he walked it?", "Thirty years", routeEvidence)}
+        ]}"""
+        assertEquals(1, ReadingCheck.parseAll(reply, passage).size)
+    }
+
+    @Test
+    fun `the same question twice is only asked once`() {
+        val reply = """{"questions":[
+            ${question("Why did he know the lamps?", "Thirty years", routeEvidence)},
+            ${question("Why did he know the lamps?", "Thirty years", boysEvidence)}
+        ]}"""
+        assertEquals(1, ReadingCheck.parseAll(reply, passage).size)
+    }
+
+    @Test
+    fun `never returns more than the ceiling asked for`() {
+        val reply = """{"questions":[
+            ${question("A?", "a", routeEvidence)},
+            ${question("B?", "b", boysEvidence)},
+            ${question("C?", "c", "The lamplighter went along the street at dusk")}
+        ]}"""
+        assertEquals(1, ReadingCheck.parseAll(reply, passage, limit = 1).size)
+        assertEquals(3, ReadingCheck.parseAll(reply, passage, limit = 5).size)
+    }
+
+    @Test
+    fun `a reply in the old single-question shape still works`() {
+        // Worth keeping: the model does not always honour the schema, and a lone well-formed
+        // question is still a perfectly good question.
+        val reply = question("Why did he know the lamps?", "Thirty years", routeEvidence)
+        assertEquals(1, ReadingCheck.parseAll(reply, passage).size)
+    }
+
+    @Test
+    fun `junk gives no questions rather than a broken one`() {
+        assertTrue(ReadingCheck.parseAll("sorry, I can't help with that", passage).isEmpty())
+        assertTrue(ReadingCheck.parseAll("""{"questions":[]}""", passage).isEmpty())
+    }
+}
