@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.ai.AiPrefs
 import com.flashcardreader.app.ai.QuestionFeedback
+import com.flashcardreader.app.data.db.entities.ReviewContext
 import com.flashcardreader.app.ai.GeminiTutor
 import com.flashcardreader.app.ai.ReadingCheck
 import com.flashcardreader.app.data.db.entities.Source
@@ -149,6 +150,13 @@ class ReaderViewModel(
 
     /** Row id of the question currently on offer, so answering it doesn't have to search for it. */
     private var pendingCheckIds: List<Long?> = emptyList()
+
+    /**
+     * Whether the questions on screen came round again rather than being written from the passage
+     * just read. A delayed answer is much stronger evidence than an immediate one, so which of the
+     * two this is has to be recorded, not inferred later.
+     */
+    private var pendingAreRevisits = false
 
     /**
      * Questions from earlier in *this* book that have come due again.
@@ -403,6 +411,7 @@ class ReaderViewModel(
         dueFromThisBook.removeFirstOrNull()?.let { revisit ->
             generatedForWindow = true
             pendingCheckIds = listOf(revisit.id)
+            pendingAreRevisits = true
             _uiState.update {
                 it.copy(
                     pendingChecks = listOf(
@@ -450,6 +459,7 @@ class ReaderViewModel(
             }
             // Saved before being asked, so every question is kept and scheduled even if this
             // batch is skipped - the point is that they come back, not that they are answered now.
+            pendingAreRevisits = false
             pendingCheckIds = checks.map {
                 runCatching { readingCheckRepository.save(it, sourceId, offset) }.getOrNull()
             }
@@ -519,9 +529,10 @@ class ReaderViewModel(
             clearCheckWindow()
         }
         if (cardId == null) return
+        val answeredIn = if (pendingAreRevisits) ReviewContext.REVISIT else ReviewContext.READING
         viewModelScope.launch {
             val card = readingCheckRepository.byId(cardId) ?: return@launch
-            readingCheckRepository.answer(card, correct)
+            readingCheckRepository.answer(card, correct, context = answeredIn)
         }
     }
 
@@ -567,6 +578,7 @@ class ReaderViewModel(
         chunksSinceCheck.clear()
         generatedForWindow = false
         pendingCheckIds = emptyList()
+        pendingAreRevisits = false
         _uiState.update { it.copy(pendingChecks = emptyList(), checkIndex = 0, checkDue = false) }
     }
 
@@ -651,7 +663,7 @@ class ReaderViewModel(
         onReadingInteraction()
         val match = _uiState.value.pendingFlashcards.firstOrNull() ?: return
         viewModelScope.launch {
-            val updated = termRepository.submitReview(match.term, rating, confidence)
+            val updated = termRepository.submitReview(match.term, rating, confidence, ReviewContext.READING)
             _uiState.update { s ->
                 s.copy(
                     pendingFlashcards = s.pendingFlashcards.drop(1),

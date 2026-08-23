@@ -3,6 +3,7 @@ package com.flashcardreader.app.data.repository
 import com.flashcardreader.app.ai.ReadingCheck
 import com.flashcardreader.app.data.db.dao.ReadingCheckDao
 import com.flashcardreader.app.data.db.entities.ReadingCheckCard
+import com.flashcardreader.app.data.db.entities.ReviewContext
 import com.flashcardreader.app.data.fsrs.Fsrs
 import com.flashcardreader.app.data.fsrs.FsrsState
 import com.flashcardreader.app.data.fsrs.Rating
@@ -16,7 +17,15 @@ import kotlinx.coroutines.flow.Flow
  * tapping "I knew that" is just a claim.
  */
 /** Progress-screen totals for the comprehension questions. */
-data class ReadingCheckCounts(val due: Int = 0, val answered: Int = 0, val remembered: Int = 0)
+data class ReadingCheckCounts(
+    val due: Int = 0,
+    val answered: Int = 0,
+    val remembered: Int = 0,
+    /** Got right at least once, anywhere. */
+    val everCorrect: Int = 0,
+    /** Got right when the passage was not the thing just read - the number worth trusting. */
+    val retained: Int = 0,
+)
 
 class ReadingCheckRepository(
     private val dao: ReadingCheckDao,
@@ -49,7 +58,21 @@ class ReadingCheckRepository(
         due = dao.dueCount(now),
         answered = dao.answeredCount(),
         remembered = dao.rememberedCount(),
+        everCorrect = dao.everCorrectCount(),
+        retained = dao.retainedCount(),
     )
+
+    /**
+     * Per-book progress, titled.
+     *
+     * Books whose questions were all deleted with the book leave rows behind only if the source is
+     * gone, so an unresolvable title is dropped rather than shown as a blank row.
+     */
+    suspend fun masteryByBook(titles: Map<Long, String>): List<BookMastery> =
+        dao.masteryByBook().mapNotNull { row ->
+            val title = titles[row.sourceId] ?: return@mapNotNull null
+            BookMastery(title, row.total, row.correct, row.retained)
+        }
 
     suspend fun forSource(sourceId: Long): List<ReadingCheckCard> = dao.forSource(sourceId)
 
@@ -68,6 +91,7 @@ class ReadingCheckRepository(
         card: ReadingCheckCard,
         correct: Boolean,
         wasConfident: Boolean = false,
+        context: ReviewContext = ReviewContext.UNKNOWN,
         now: Long = System.currentTimeMillis(),
     ) {
         val rating = if (correct) Rating.GOOD else Rating.AGAIN
@@ -78,6 +102,7 @@ class ReadingCheckRepository(
             stabilityBefore = card.stability,
             difficultyBefore = card.difficulty,
             lastReviewedAt = card.lastReviewedAt,
+            context = context,
             now = now,
         )
         val next = fsrs.review(

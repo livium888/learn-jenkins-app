@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.ai.QuestionFeedback
 import com.flashcardreader.app.ai.ReadingCheck
 import com.flashcardreader.app.data.db.entities.ReadingCheckCard
+import com.flashcardreader.app.data.db.entities.ReviewContext
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Rating
@@ -101,7 +102,7 @@ class ReviewViewModel(
     fun answerCurrentCheck(correct: Boolean) {
         val card = _uiState.value.checkQueue.firstOrNull() ?: return
         viewModelScope.launch {
-            readingCheckRepository.answer(card, correct)
+            readingCheckRepository.answer(card, correct, context = ReviewContext.REVIEW)
             _uiState.update { it.copy(checkQueue = it.checkQueue.drop(1)) }
             advanceAfterCheck()
         }
@@ -157,7 +158,7 @@ class ReviewViewModel(
     fun answerCurrent(rating: Rating, confidence: Confidence) {
         val term = _uiState.value.queue.firstOrNull() ?: return
         viewModelScope.launch {
-            termRepository.submitReview(term, rating, confidence)
+            termRepository.submitReview(term, rating, confidence, ReviewContext.REVIEW)
             answeredSinceCheck++
             _uiState.update {
                 val remaining = it.queue.drop(1)

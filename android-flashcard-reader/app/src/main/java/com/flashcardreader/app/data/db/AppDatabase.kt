@@ -17,6 +17,7 @@ import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.Occurrence
 import com.flashcardreader.app.data.db.entities.CardKind
 import com.flashcardreader.app.data.db.entities.ReadingCheckCard
+import com.flashcardreader.app.data.db.entities.ReviewContext
 import com.flashcardreader.app.data.db.entities.ReviewLog
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.SourceType
@@ -40,6 +41,15 @@ class Converters {
 
     @TypeConverter
     fun stringToCardKind(value: String): CardKind = CardKind.valueOf(value)
+
+    @TypeConverter
+    fun reviewContextToString(value: ReviewContext): String = value.name
+
+    // Tolerant on the way back: a row written by a newer build than this one should not crash the
+    // reader, and an unrecognised context is exactly as informative as no context.
+    @TypeConverter
+    fun stringToReviewContext(value: String): ReviewContext =
+        runCatching { ReviewContext.valueOf(value) }.getOrDefault(ReviewContext.UNKNOWN)
 }
 
 @Database(
@@ -50,7 +60,7 @@ class Converters {
         ReadingCheckCard::class,
         ReviewLog::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -141,13 +151,30 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v6 records *where* each answer was given, so understanding something can be told apart
+         * from retaining it - see ReviewContext.
+         *
+         * The default is written here and declared on the entity with the same literal. Room
+         * compares the two after every upgrade, and a mismatch is not a warning: it refuses to
+         * open the database, which is precisely how v5 crashed the app on launch. Existing rows
+         * predate the distinction and honestly say so rather than guessing a context for them.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE review_logs ADD COLUMN context TEXT NOT NULL DEFAULT 'UNKNOWN'",
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "flashcard-reader.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build().also { instance = it }
             }
     }
 }

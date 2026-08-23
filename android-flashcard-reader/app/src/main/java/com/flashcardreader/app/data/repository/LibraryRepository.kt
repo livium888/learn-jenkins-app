@@ -43,6 +43,9 @@ class LibraryRepository(
 
     suspend fun getSource(id: Long): Source? = sourceDao.getById(id)
 
+    /** Every book, once, for screens that need to put titles against ids. */
+    suspend fun allSources(): List<Source> = sourceDao.snapshot()
+
     suspend fun readText(source: Source): String = withContext(Dispatchers.IO) {
         File(source.textFilePath).readText()
     }

@@ -3,6 +3,7 @@ package com.flashcardreader.app.data.repository
 import android.content.Context
 import com.flashcardreader.app.data.db.dao.ReviewLogDao
 import com.flashcardreader.app.data.db.entities.CardKind
+import com.flashcardreader.app.data.db.entities.ReviewContext
 import com.flashcardreader.app.data.db.entities.ReviewLog
 import com.flashcardreader.app.data.fsrs.FsrsOptimizer
 import com.flashcardreader.app.data.fsrs.FsrsWeights
@@ -37,6 +38,7 @@ class ReviewHistory(
         stabilityBefore: Double,
         difficultyBefore: Double,
         lastReviewedAt: Long?,
+        context: ReviewContext = ReviewContext.UNKNOWN,
         now: Long = System.currentTimeMillis(),
     ) {
         dao.insert(
@@ -49,6 +51,7 @@ class ReviewHistory(
                 difficultyBefore = difficultyBefore,
                 wasFirstReview = lastReviewedAt == null,
                 reviewedAt = now,
+                context = context,
             ),
         )
     }

@@ -6,6 +6,7 @@ import com.flashcardreader.app.data.db.dao.SourceDao
 import com.flashcardreader.app.data.db.entities.CardKind
 import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.ReadingCheckCard
+import com.flashcardreader.app.data.db.entities.ReviewContext
 import com.flashcardreader.app.data.db.entities.ReviewLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -79,7 +80,10 @@ class BackupRepository(
                     .put("stabilityBefore", log.stabilityBefore)
                     .put("difficultyBefore", log.difficultyBefore)
                     .put("wasFirstReview", log.wasFirstReview)
-                    .put("reviewedAt", log.reviewedAt),
+                    .put("reviewedAt", log.reviewedAt)
+                    // Carried, or a phone move would quietly reset every book to "understood but
+                    // not retained" - the same class of silent loss the questions themselves had.
+                    .put("context", log.context.name),
             )
         }
         return arr
@@ -164,6 +168,11 @@ class BackupRepository(
                     difficultyBefore = o.optDouble("difficultyBefore", 0.0),
                     wasFirstReview = o.optBoolean("wasFirstReview", false),
                     reviewedAt = o.optLong("reviewedAt", 0L),
+                    // A version 2 file written before contexts existed says nothing about where
+                    // its answers happened, and UNKNOWN says exactly that rather than guessing.
+                    context = runCatching {
+                        ReviewContext.valueOf(o.optString("context", ReviewContext.UNKNOWN.name))
+                    }.getOrDefault(ReviewContext.UNKNOWN),
                 ),
             )
         }

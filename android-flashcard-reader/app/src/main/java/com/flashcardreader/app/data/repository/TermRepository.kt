@@ -4,6 +4,7 @@ import com.flashcardreader.app.data.db.dao.OccurrenceDao
 import com.flashcardreader.app.data.db.dao.TermDao
 import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.Occurrence
+import com.flashcardreader.app.data.db.entities.ReviewContext
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Fsrs
@@ -87,7 +88,14 @@ class TermRepository(
      * hypercorrection flag: being confident but wrong sets it; getting it right (Good/Easy)
      * clears it; anything else leaves it unchanged.
      */
-    suspend fun submitReview(term: Term, rating: Rating, confidence: Confidence): Term {
+    suspend fun submitReview(
+        term: Term,
+        rating: Rating,
+        confidence: Confidence,
+        // Words get the same treatment as questions so the history is honest about both, even
+        // though it is the comprehension questions that mastery is currently read from.
+        context: ReviewContext = ReviewContext.UNKNOWN,
+    ): Term {
         val now = System.currentTimeMillis()
         // Logged before rescheduling, because the fit needs the state the answer was given from.
         history?.record(
@@ -97,6 +105,7 @@ class TermRepository(
             stabilityBefore = term.stability,
             difficultyBefore = term.difficulty,
             lastReviewedAt = term.lastReviewedAt,
+            context = context,
             now = now,
         )
         val scheduled = fsrs.review(term, rating, now)

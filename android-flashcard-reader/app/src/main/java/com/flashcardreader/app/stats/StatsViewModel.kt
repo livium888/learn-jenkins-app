@@ -8,6 +8,8 @@ import com.flashcardreader.app.ai.QuestionFeedback
 import com.flashcardreader.app.data.repository.BackupRepository
 import com.flashcardreader.app.data.repository.CalibrationLevel
 import com.flashcardreader.app.data.repository.CalibrationStore
+import com.flashcardreader.app.data.repository.BookMastery
+import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.repository.ReadingCheckCounts
 import com.flashcardreader.app.data.repository.ReviewHistory
 import com.flashcardreader.app.data.repository.ReadingCheckRepository
@@ -43,6 +45,12 @@ data class Stats(
     val readingChecksDue: Int = 0,
     val readingChecksAnswered: Int = 0,
     val readingChecksRemembered: Int = 0,
+    /** Answered right at least once, anywhere. */
+    val readingChecksEverCorrect: Int = 0,
+    /** Answered right when the passage wasn't the thing just read - the number that means most. */
+    val readingChecksRetained: Int = 0,
+    /** The same split per book, so one that stuck can be told from one that didn't. */
+    val mastery: List<BookMastery> = emptyList(),
     /** How many reviews the scheduler's fitted weights were built from; 0 = FSRS defaults. */
     val scheduleFittedFrom: Int = 0,
 )
@@ -54,6 +62,7 @@ class StatsViewModel(
     private val reviewHistory: ReviewHistory,
     private val backup: BackupRepository,
     private val feedback: QuestionFeedback,
+    private val library: LibraryRepository,
 ) : ViewModel() {
     // Combined so the comprehension questions refresh with everything else - a count that only
     // updated when a *word* changed would go stale exactly when someone came to check it.
@@ -71,6 +80,11 @@ class StatsViewModel(
                 readingChecksDue = counts.due,
                 readingChecksAnswered = counts.answered,
                 readingChecksRemembered = counts.remembered,
+                readingChecksEverCorrect = counts.everCorrect,
+                readingChecksRetained = counts.retained,
+                mastery = runCatching {
+                    readingChecks.masteryByBook(library.allSources().associate { it.id to it.title })
+                }.getOrDefault(emptyList()),
                 scheduleFittedFrom = reviewHistory.fittedFromReviews,
             )
         }

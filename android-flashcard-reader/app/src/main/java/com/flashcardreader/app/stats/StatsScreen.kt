@@ -122,13 +122,37 @@ fun StatsScreen(
                     StatRow("Written from your reading", stats.readingChecks.toString())
                     StatRow("Due now", stats.readingChecksDue.toString())
                     StatRow("Answered", stats.readingChecksAnswered.toString())
-                    StatRow("Never missed", stats.readingChecksRemembered.toString())
+                    // The two rows that matter, and the order matters too: the flattering number
+                    // first, then the one that earned it.
+                    StatRow("Right straight after reading", stats.readingChecksEverCorrect.toString())
+                    StatRow("Still right later", stats.readingChecksRetained.toString())
                     Text(
-                        "Each one is scheduled by the same algorithm as your words, so it comes back " +
-                            "when you are about to forget it rather than on a fixed timetable.",
+                        "Answering seconds after reading a passage mostly shows the words were " +
+                            "still in your head. Answering days later, mixed in among other books, " +
+                            "is the one that means you kept it - so the two are counted separately.",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+
+                // Per book, because "how much of this book stuck" is a question a single total
+                // cannot answer, and it is the one worth asking before starting another.
+                if (stats.mastery.size > 1) {
+                    SectionCard {
+                        SectionTitle("How much stuck, by book")
+                        stats.mastery.forEach { book ->
+                            StatRow(
+                                book.title,
+                                "${book.retained}/${book.total} · ${book.level.label}",
+                            )
+                        }
+                        Text(
+                            "\"Retained\" means every question about that book has been answered " +
+                                "right away from the page it came from.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
