@@ -9,20 +9,19 @@ import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -42,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -61,16 +61,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.interaction.DragInteraction
-import androidx.compose.foundation.interaction.PressInteraction
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -84,16 +83,30 @@ import com.flashcardreader.app.theme.colorsFor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import kotlin.math.ceil
-import kotlin.math.max
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+
+/**
+ * Space above and below the text on every page. Used both to draw the page and to measure it -
+ * one constant, because a difference between the two would mean the last line of every page is
+ * laid out as fitting and then drawn off the bottom of the screen.
+ */
+private val PAGE_VERTICAL_PADDING = 24.dp
+
+/**
+ * Room reserved for a chapter heading on the page that opens a chapter.
+ *
+ * Deliberately generous - the rule and title come to about 87dp for a one-line title and more if
+ * it wraps. Reserving too much only means that page holds a line or two less; reserving too little
+ * pushes the page's last line off the bottom of the screen, where it is gone without a trace.
+ */
+private val CHAPTER_HEADING_HEIGHT = 120.dp
 
 /** What the add/edit-flashcard dialog is currently prefilled with, or null if closed. */
 private data class FlashcardPrefill(val term: String, val definition: String, val contextSentence: String = "")
 
-private const val PAGE_CHARS = 1500
-
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ReaderScreen(
     viewModel: ReaderViewModel,
@@ -105,7 +118,10 @@ fun ReaderScreen(
     val colors = colorsFor(typography.palette)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
+    // One page per pager page. The reader turns pages now rather than scrolling, which is what
+    // lets everything downstream stop guessing: the page on screen IS the text being read, so its
+    // words, its dwell and the passage a question comes from are exact rather than estimated.
+    val pagerState = rememberPagerState(pageCount = { state.chunks.size })
 
     // Resolve the reader font: system fonts are instant; accessibility fonts (OpenDyslexic,
     // Atkinson) download on first use and fall back to sans-serif until ready.
@@ -120,8 +136,9 @@ fun ReaderScreen(
     // Absolute char ranges (into the full book text) of the word being pressed / selected.
     var pressingRange by remember { mutableStateOf<IntRange?>(null) }
     var selectedRange by remember { mutableStateOf<IntRange?>(null) }
-    var autoScroll by remember { mutableStateOf(false) }
-    var autoScrollSpeed by remember { mutableStateOf(4f) }
+    // Hands-free reading turns pages on a timer instead of creeping the text upwards.
+    var autoTurn by remember { mutableStateOf(false) }
+    var secondsPerPage by remember { mutableStateOf(35f) }
 
     // Keep the screen awake while reading; restore normal behaviour on leaving.
     val activity = context as? Activity
@@ -151,27 +168,29 @@ fun ReaderScreen(
         }
     }
 
-    // One-time jump to the resume position once the book has loaded.
-    LaunchedEffect(state.loading) {
-        if (!state.loading && state.initialChunkIndex > 0) {
-            listState.scrollToItem(state.initialChunkIndex)
+    // Jump to where reading left off, once the book has been laid out. Keyed on the page count so
+    // it also lands correctly after a re-layout - changing the font size must not lose your place.
+    LaunchedEffect(state.paginated, state.chunks.size) {
+        if (state.paginated && state.chunks.isNotEmpty()) {
+            pagerState.scrollToPage(state.initialChunkIndex.coerceIn(0, state.chunks.lastIndex))
         }
     }
 
-    // Hands-free auto-scroll: advance a few pixels each frame; stop at the end of the book.
-    LaunchedEffect(autoScroll, autoScrollSpeed) {
-        if (autoScroll) {
+    // Hands-free reading: turn the page on a timer, and stop at the end of the book.
+    LaunchedEffect(autoTurn, secondsPerPage, state.chunks.size) {
+        if (autoTurn) {
             while (true) {
-                val consumed = listState.scrollBy(autoScrollSpeed)
-                if (consumed == 0f) { autoScroll = false; break }
-                delay(16)
+                delay((secondsPerPage * 1000).toLong())
+                val next = pagerState.currentPage + 1
+                if (next >= state.chunks.size) { autoTurn = false; break }
+                pagerState.animateScrollToPage(next)
             }
         }
     }
 
     fun jumpToOffset(offset: Int) {
         val idx = chunkIndexForOffset(state.chunks, offset)
-        scope.launch { listState.scrollToItem(idx) }
+        scope.launch { pagerState.scrollToPage(idx.coerceIn(0, (state.chunks.size - 1).coerceAtLeast(0))) }
     }
 
     Scaffold(
@@ -213,19 +232,21 @@ fun ReaderScreen(
         bottomBar = {
             if (!state.loading) {
                 ReaderProgressBar(
-                    totalChars = state.fullText.length,
-                    currentChar = state.currentCharOffset,
+                    pageIndex = pagerState.currentPage,
+                    pageCount = state.chunks.size,
                     chapterTitle = currentChapterTitle(state.chapters, state.currentCharOffset),
                     background = colors.background,
                     onColor = colors.text,
-                    autoScroll = autoScroll,
-                    onToggleAutoScroll = { autoScroll = !autoScroll },
+                    autoTurn = autoTurn,
+                    onToggleAutoTurn = { autoTurn = !autoTurn },
                     focusEnabled = viewModel.focusEnabled,
                     creditSeconds = creditSeconds,
                     creditIdle = state.creditIdle,
-                    speed = autoScrollSpeed,
-                    onSpeedChange = { autoScrollSpeed = it },
-                    onScrub = { fraction -> jumpToOffset((fraction * state.fullText.length).toInt()) },
+                    secondsPerPage = secondsPerPage,
+                    onSecondsPerPageChange = { secondsPerPage = it },
+                    onScrubToPage = { page ->
+                        scope.launch { pagerState.scrollToPage(page.coerceIn(0, (state.chunks.size - 1).coerceAtLeast(0))) }
+                    },
                 )
             }
         },
@@ -244,21 +265,24 @@ fun ReaderScreen(
             textAlign = if (typography.justify) TextAlign.Justify else TextAlign.Start,
         )
 
-        // Report the visible chunk range to the ViewModel as the user scrolls, so it can
-        // save the reading position and pop a flashcard when a due word scrolls into view.
-        LaunchedEffect(listState, state.chunks) {
-            snapshotFlow {
-                val info = listState.layoutInfo.visibleItemsInfo
-                if (info.isEmpty()) null else info.first().index to info.last().index
-            }
+        // Report the page on screen. Exactly one page is visible, so "what is being read" stops
+        // being a range and becomes a single index - and turning a page is itself the human touch
+        // that proves somebody is there, which is why it also reports an interaction.
+        LaunchedEffect(pagerState, state.chunks) {
+            snapshotFlow { pagerState.currentPage }
                 .distinctUntilChanged()
-                .collect { range -> range?.let { viewModel.onVisibleRange(it.first, it.second) } }
+                .collect { page ->
+                    if (state.chunks.isNotEmpty()) {
+                        viewModel.onReadingInteraction()
+                        viewModel.onVisibleRange(page, page)
+                    }
+                }
         }
 
         // Focus Gate: measure genuine reading. repeatOnLifecycle(RESUMED) means switching apps or
         // turning the screen off stops accrual for free, and cancelling clears part-read progress.
         val lifecycleOwner = LocalLifecycleOwner.current
-        LaunchedEffect(listState) {
+        LaunchedEffect(pagerState) {
             lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 var last = SystemClock.elapsedRealtime()
                 try {
@@ -280,10 +304,15 @@ fun ReaderScreen(
                             checkDue = live.checkDue,
                             inMultiWindow = activity?.isInMultiWindowMode == true,
                         )
-                        viewModel.onReadingTick(
-                            focusedChunk = if (overlays.coversText) -1 else centreChunkIndex(listState),
-                            elapsedMs = delta,
-                        )
+                        // No centre-of-viewport guess any more: the page being settled on is the
+                        // page being read. While a swipe is in flight neither page is fully in
+                        // view, so nothing accrues - which is right, and free.
+                        val focused = when {
+                            overlays.coversText -> -1
+                            pagerState.isScrollInProgress -> -1
+                            else -> pagerState.currentPage
+                        }
+                        viewModel.onReadingTick(focusedChunk = focused, elapsedMs = delta)
                     }
                 } finally {
                     viewModel.onReadingPaused()
@@ -291,50 +320,88 @@ fun ReaderScreen(
             }
         }
 
-        // Only *human* touches count as being present. listState.interactionSource emits for real
-        // drags and presses but never for programmatic scrolling, which is exactly the distinction
-        // that stops a phone left face-up on auto-scroll from farming credit.
-        LaunchedEffect(listState) {
-            listState.interactionSource.interactions.collect { interaction ->
-                if (interaction is DragInteraction.Start || interaction is PressInteraction.Press) {
-                    viewModel.onReadingInteraction()
-                }
-            }
-        }
+        val measurer = rememberTextMeasurer(cacheSize = 0)
+        val density = LocalDensity.current
 
-        Box(Modifier.fillMaxSize().padding(padding).background(colors.background)) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = typography.horizontalMarginDp.dp, vertical = 24.dp),
-            ) {
-                itemsIndexed(state.chunks, key = { _, chunk -> chunk.startChar }) { index, chunk ->
-                    val chapter = chunk.chapterTitle
-                    if (chapter != null) {
-                        ChapterDivider(chapter, colors)
-                    } else if (index > 0) {
-                        // Draw a numbered page-break line wherever the text crosses a page boundary.
-                        val prevPage = state.chunks[index - 1].startChar / PAGE_CHARS
-                        val thisPage = chunk.startChar / PAGE_CHARS
-                        if (thisPage > prevPage) PageBreak(thisPage + 1, colors)
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding).background(colors.background)) {
+            val marginDp = typography.horizontalMarginDp.dp
+            val pageWidthPx = with(density) { (maxWidth - marginDp * 2).toPx().toInt() }
+            val pageHeightPx = with(density) { (maxHeight - PAGE_VERTICAL_PADDING * 2).toPx() }
+            // A chapter heading is drawn above the text on the page that opens a chapter, so that
+            // page has less room. Laying it out as though the heading were not there would push
+            // its last line off the bottom of the screen and lose it silently.
+            val chapterPageHeightPx = pageHeightPx - with(density) { CHAPTER_HEADING_HEIGHT.toPx() }
+
+            // Everything that changes where the lines fall. A mismatch is only a cache miss, so
+            // being over-inclusive here costs a re-layout and being under-inclusive shows wrong pages.
+            val signature = listOf(
+                "v1", pageWidthPx, pageHeightPx.toInt(), typography.font.name,
+                typography.fontSize.value, typography.lineHeight.value,
+                typography.letterSpacing.value, typography.justify,
+                typography.horizontalMarginDp, state.fullText.length,
+            ).joinToString("|")
+
+            LaunchedEffect(signature, state.fullText) {
+                if (state.fullText.isEmpty() || pageWidthPx <= 0 || pageHeightPx <= 0f) return@LaunchedEffect
+                val cached = viewModel.cachedPages(signature)
+                if (cached != null) {
+                    viewModel.onPaginated(cached, signature)
+                    return@LaunchedEffect
+                }
+                // Laying out a whole book is measurable work - seconds for a long one - so it runs
+                // off the main thread and reports progress rather than freezing on open.
+                val pages = withContext(Dispatchers.Default) {
+                    val pageMeasurer = PageMeasurer(measurer, style, pageWidthPx)
+                    val forced = state.chapters
+                        .map { it.charOffset }
+                        .filter { it in state.fullText.indices }
+                        .toSet()
+                    Paginator.paginate(
+                        textLength = state.fullText.length,
+                        pageHeightPx = pageHeightPx,
+                        blockChars = PageMeasurer.BLOCK_CHARS,
+                        forcedBreaks = forced,
+                        chapterPageHeightPx = chapterPageHeightPx,
+                        onProgress = { viewModel.onPaginationProgress(it) },
+                    ) { from, to -> pageMeasurer.linesFor(state.fullText, from, to) }
+                }
+                viewModel.onPaginated(pages, signature)
+            }
+
+            if (!state.paginated) {
+                PaginatingNotice(state.paginatingProgress, colors)
+            } else {
+                HorizontalPager(
+                    state = pagerState,
+                    // Neighbouring pages are deliberately not composed ahead: one page at a time
+                    // is the whole basis of the measurement now, and the default already does this.
+                    modifier = Modifier.fillMaxSize(),
+                ) { index ->
+                    val chunk = state.chunks.getOrNull(index) ?: return@HorizontalPager
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = marginDp, vertical = PAGE_VERTICAL_PADDING),
+                    ) {
+                        chunk.chapterTitle?.let { ChapterDivider(it, colors) }
+                        ChunkText(
+                            chunk = chunk,
+                            style = style,
+                            accent = colors.accent,
+                            selecting = pressingRange,
+                            selected = selectedRange,
+                            onSelecting = { viewModel.onReadingInteraction(); pressingRange = it },
+                            onClear = { viewModel.onReadingInteraction(); selectedRange = null; pressingRange = null },
+                            onSelectPhrase = { phrase, range ->
+                                selectedRange = range
+                                pressingRange = null
+                                val cleaned = phrase.trim()
+                                val existing = state.terms.find { it.normalizedText == cleaned.lowercase() }
+                                val sentence = ContextExtractor.sentenceAround(state.fullText, range.first, range.last + 1)
+                                flashcardPrefill = FlashcardPrefill(cleaned, existing?.definition.orEmpty(), sentence)
+                            },
+                        )
                     }
-                    ChunkText(
-                        chunk = chunk,
-                        style = style,
-                        accent = colors.accent,
-                        selecting = pressingRange,
-                        selected = selectedRange,
-                        onSelecting = { viewModel.onReadingInteraction(); pressingRange = it },
-                        onClear = { viewModel.onReadingInteraction(); selectedRange = null; pressingRange = null },
-                        onSelectPhrase = { phrase, range ->
-                            selectedRange = range
-                            pressingRange = null
-                            val cleaned = phrase.trim()
-                            val existing = state.terms.find { it.normalizedText == cleaned.lowercase() }
-                            val sentence = ContextExtractor.sentenceAround(state.fullText, range.first, range.last + 1)
-                            flashcardPrefill = FlashcardPrefill(cleaned, existing?.definition.orEmpty(), sentence)
-                        },
-                    )
                 }
             }
 
@@ -426,25 +493,40 @@ fun ReaderScreen(
 }
 
 /** A visual page break: a thin rule across the column with the page number centered on it. */
+/**
+ * Shown while the book is being laid out against this screen.
+ *
+ * Only the first opening of a book at a given size pays this: the page breaks are kept, so
+ * reopening it - or coming back after changing nothing - is instant. Changing the font or turning
+ * the phone genuinely changes where every page falls, so that has to be paid again.
+ */
 @Composable
-private fun PageBreak(pageNumber: Int, colors: ReaderColors) {
-    val line = colors.text.copy(alpha = 0.18f)
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.weight(1f).height(1.dp).background(line))
-        Text(
-            pageNumber.toString(),
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.text.copy(alpha = 0.5f),
-            modifier = Modifier.padding(horizontal = 12.dp),
-        )
-        Box(Modifier.weight(1f).height(1.dp).background(line))
+private fun PaginatingNotice(progress: Float, colors: ReaderColors) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 48.dp),
+        ) {
+            Text(
+                "Laying out the pages…",
+                style = MaterialTheme.typography.bodyLarge,
+                color = colors.text,
+            )
+            LinearProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Once only, for this text size. It is kept for next time.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.text.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
-/** A calm landmark where a chapter begins: its title over a short accent rule. */
 @Composable
 private fun ChapterDivider(title: String, colors: ReaderColors) {
     Column(
@@ -468,35 +550,36 @@ private fun ChapterDivider(title: String, colors: ReaderColors) {
  */
 @Composable
 private fun ReaderProgressBar(
-    totalChars: Int,
-    currentChar: Int,
+    pageIndex: Int,
+    pageCount: Int,
     chapterTitle: String?,
     background: Color,
     onColor: Color,
-    autoScroll: Boolean,
-    onToggleAutoScroll: () -> Unit,
+    autoTurn: Boolean,
+    onToggleAutoTurn: () -> Unit,
     focusEnabled: Boolean,
     creditSeconds: Long,
     creditIdle: Boolean,
-    speed: Float,
-    onSpeedChange: (Float) -> Unit,
-    onScrub: (Float) -> Unit,
+    secondsPerPage: Float,
+    onSecondsPerPageChange: (Float) -> Unit,
+    onScrubToPage: (Int) -> Unit,
 ) {
-    val fraction = if (totalChars > 0) (currentChar.toFloat() / totalChars).coerceIn(0f, 1f) else 0f
+    // Real pages now, not an estimate from a character count - so "page 40 of 312" is the book's
+    // actual shape at this text size, and the scrubber lands on a page rather than near one.
+    val lastPage = (pageCount - 1).coerceAtLeast(0)
     var scrub by remember { mutableStateOf<Float?>(null) }
-    val shown = scrub ?: fraction
-    val totalPages = max(1, ceil(totalChars.toDouble() / PAGE_CHARS).toInt())
-    val page = ((shown * totalChars) / PAGE_CHARS).toInt() + 1
+    val shownPage = scrub?.let { (it * lastPage).roundToInt() } ?: pageIndex
+    val fraction = if (lastPage > 0) shownPage.toFloat() / lastPage else 0f
     val muted = onColor.copy(alpha = 0.7f)
 
     Surface(color = background) {
         Column(Modifier.fillMaxWidth().padding(start = 8.dp, end = 16.dp, top = 2.dp, bottom = 4.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onToggleAutoScroll) {
+                IconButton(onClick = onToggleAutoTurn) {
                     Icon(
-                        if (autoScroll) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (autoScroll) "Pause auto-scroll" else "Start auto-scroll",
-                        tint = if (autoScroll) MaterialTheme.colorScheme.primary else muted,
+                        if (autoTurn) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (autoTurn) "Stop turning pages" else "Turn pages automatically",
+                        tint = if (autoTurn) MaterialTheme.colorScheme.primary else muted,
                     )
                 }
                 Text(
@@ -518,26 +601,34 @@ private fun ReaderProgressBar(
                     )
                 }
                 Text(
-                    "Page ${page.coerceAtMost(totalPages)} of $totalPages · ${(shown * 100).roundToInt()}%",
+                    "Page ${shownPage + 1} of ${pageCount.coerceAtLeast(1)} · ${(fraction * 100).roundToInt()}%",
                     style = MaterialTheme.typography.labelMedium,
                     color = muted,
                 )
             }
-            if (autoScroll) {
+            if (autoTurn) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Speed", style = MaterialTheme.typography.labelSmall, color = muted)
+                    Text(
+                        "${secondsPerPage.roundToInt()}s a page",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = muted,
+                    )
                     Slider(
-                        value = speed,
-                        onValueChange = onSpeedChange,
-                        valueRange = 1f..14f,
+                        value = secondsPerPage,
+                        onValueChange = onSecondsPerPageChange,
+                        valueRange = 10f..120f,
                         modifier = Modifier.weight(1f).padding(start = 12.dp),
                     )
                 }
             }
             Slider(
-                value = shown,
+                value = fraction,
                 onValueChange = { scrub = it },
-                onValueChangeFinished = { scrub?.let(onScrub); scrub = null },
+                onValueChangeFinished = {
+                    scrub?.let { onScrubToPage((it * lastPage).roundToInt()) }
+                    scrub = null
+                },
+                enabled = lastPage > 0,
             )
         }
     }
@@ -798,20 +889,3 @@ private fun clipboardText(context: Context): String {
 
 /** How often the Focus Gate credit tracker samples the viewport. */
 private const val CREDIT_TICK_MS = 500L
-
-/**
- * The chunk under the middle of the viewport, or -1 if there is none.
- *
- * Deliberately *one* chunk rather than everything visible: `visibleItemsInfo` counts an item as
- * visible from a single pixel, so on a tall screen several chunks would each bank the same minute.
- * Because the list renders exactly one item per chunk, LazyListItemInfo.index is the chunk index.
- */
-private fun centreChunkIndex(listState: LazyListState): Int {
-    val info = listState.layoutInfo
-    val items = info.visibleItemsInfo
-    if (items.isEmpty()) return -1
-    val centre = (info.viewportStartOffset + info.viewportEndOffset) / 2
-    items.firstOrNull { centre >= it.offset && centre < it.offset + it.size }?.let { return it.index }
-    // Nothing spans the midpoint (very short chunks with gaps): fall back to the tallest one.
-    return items.maxByOrNull { it.size }?.index ?: -1
-}

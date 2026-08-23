@@ -124,6 +124,7 @@ class LibraryRepository(
         tocFile(source).delete()
         bookmarksFile(source).delete()
         creditedFile(source).delete()
+        legacyCreditedFile(source).delete()
         sourceDao.delete(source.id)
     }
 
@@ -136,7 +137,18 @@ class LibraryRepository(
     private fun bookmarksFile(source: Source): File =
         File("${source.textFilePath.removeSuffix(".txt")}.bookmarks.json")
 
+    /**
+     * Which stretches of this book have already earned Focus Gate time.
+     *
+     * A new filename on purpose: the old `.credited.json` held page *indices*, which stopped
+     * meaning anything once pages became real and could be re-laid-out at a different text size.
+     * This one holds positions in the text, which do not move. An old file is simply ignored.
+     */
     private fun creditedFile(source: Source): File =
+        File("${source.textFilePath.removeSuffix(".txt")}.paid.json")
+
+    /** The page-index-keyed file this replaced. Only still referenced so deleting a book removes it. */
+    private fun legacyCreditedFile(source: Source): File =
         File("${source.textFilePath.removeSuffix(".txt")}.credited.json")
 
     /**

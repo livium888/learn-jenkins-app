@@ -36,14 +36,22 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * One item in the scrolling reader; [startChar] is this slice's offset into the full book text.
- * [chapterTitle] is set on the chunk that begins a chapter, so the reader can draw a divider there.
+ * One page of the book, as laid out for this screen at this text size.
+ *
+ * [startChar] is its offset into the full book text, so a page can always be mapped back to a
+ * position that survives re-laying the book out. [chapterTitle] is set on the page that opens a
+ * chapter, which is why that page is given a heading and a little less room for text.
  */
 data class TextChunk(
     val startChar: Int,
     val text: String,
     val chapterTitle: String? = null,
-    /** Words in this chunk, used by the Focus Gate credit tracker to size a plausible dwell time. */
+    /**
+     * Words on this page, used to price how long it must plausibly take to read.
+     *
+     * Exact now rather than approximate: this is the text actually on screen, not a slice of the
+     * book that happened to be nearest the middle of a scrolling viewport.
+     */
     val wordCount: Int = 0,
 ) {
     val endChar: Int get() = startChar + text.length
@@ -72,6 +80,16 @@ data class ReaderUiState(
     val pendingFlashcards: List<TermMatch> = emptyList(),
     val typography: ReaderTypography = ReaderTypography(),
     val loading: Boolean = true,
+    /**
+     * False until the book has been laid out against this screen and this typography.
+     *
+     * Pages cannot be worked out until there is a page to measure against, so the text is loaded
+     * first and broken into pages afterwards, in the reader. Everything downstream - the credit
+     * tracker, the term scanner, the passage a question is written from - waits for this.
+     */
+    val paginated: Boolean = false,
+    /** Set while laying a long book out, so a pause on open says what it is doing. */
+    val paginatingProgress: Float = 0f,
     /** True when Focus Gate accrual has paused because nobody has touched the screen for a while. */
     val creditIdle: Boolean = false,
     /**
@@ -187,21 +205,89 @@ class ReaderViewModel(
                     .filter { it.reps > 0 }
                     .toMutableList()
             }.getOrDefault(mutableListOf())
-            // Chunking walks the whole book string; keep it off the main thread so a large
-            // book doesn't hitch on open.
-            val chunks = withContext(Dispatchers.Default) { chunkText(text, chapters) }
-            val startIndex = source?.let { src ->
-                chunks.indexOfFirst { it.endChar > src.lastPositionChar }.let { if (it < 0) 0 else it }
-            } ?: 0
-            val startOffset = chunks.getOrNull(startIndex)?.startChar ?: 0
             _uiState.update {
                 it.copy(
-                    source = source, fullText = text, terms = terms, chunks = chunks,
-                    chapters = chapters, bookmarks = bookmarks, currentCharOffset = startOffset,
-                    initialChunkIndex = startIndex, typography = typography, loading = false,
+                    source = source, fullText = text, terms = terms,
+                    chapters = chapters, bookmarks = bookmarks,
+                    currentCharOffset = source?.lastPositionChar ?: 0,
+                    typography = typography, loading = false,
                 )
             }
         }
+    }
+
+    /**
+     * Hands the reader its pages, once the screen has laid the book out.
+     *
+     * Turns the measured ranges into the pages everything else works from, tags the one that
+     * begins each chapter, and works out which page the reader left off on. Word counts are
+     * computed here, once, because the credit tracker prices a page's dwell on them and asking
+     * for them twice a second would be wasteful.
+     */
+    fun onPaginated(pages: List<Page>, signature: String) {
+        if (pages.isEmpty()) return
+        viewModelScope.launch {
+            val state = _uiState.value
+            val text = state.fullText
+            val chapterAt = HashMap<Int, String>()
+            for (c in state.chapters) {
+                if (c.charOffset in text.indices) chapterAt.putIfAbsent(c.charOffset, c.title)
+            }
+            val built = withContext(Dispatchers.Default) {
+                pages.map { page ->
+                    val body = text.substring(
+                        page.startChar.coerceIn(0, text.length),
+                        page.endChar.coerceIn(0, text.length),
+                    )
+                    TextChunk(
+                        startChar = page.startChar,
+                        text = body,
+                        chapterTitle = chapterAt[page.startChar],
+                        wordCount = body.split(WORD_SPLIT).count { it.isNotBlank() },
+                    )
+                }
+            }
+            // Resume from where reading actually is, not from what was last written to disk -
+            // so changing the text size mid-book lands on the same words, not an older position.
+            val resumeOffset = state.currentCharOffset.takeIf { it > 0 }
+                ?: (state.source?.lastPositionChar ?: 0)
+            val startIndex = Paginator.pageIndexForOffset(pages, resumeOffset)
+            // Page numbers change meaning whenever the book is re-laid-out, so everything keyed
+            // by them is dropped here: what has been scanned for words, and the part-read dwell.
+            // What survives is keyed by position in the text, which does not move.
+            scannedChunks.clear()
+            lastPersistedChunk = -1
+            creditTracker.setPages(
+                starts = IntArray(pages.size) { pages[it].startChar },
+                ends = IntArray(pages.size) { pages[it].endChar },
+            )
+            _uiState.update {
+                it.copy(
+                    chunks = built,
+                    initialChunkIndex = startIndex,
+                    currentCharOffset = built.getOrNull(startIndex)?.startChar ?: 0,
+                    paginated = true,
+                    paginatingProgress = 1f,
+                )
+            }
+            // Kept so the next opening of this book, at this size and this typography, is instant.
+            state.source?.let { src ->
+                runCatching {
+                    libraryRepository.savePageOffsetsCache(src, signature, pages.map { it.startChar to it.endChar })
+                }
+            }
+        }
+    }
+
+    /** Pages laid out previously for this exact screen and typography, or null to measure afresh. */
+    suspend fun cachedPages(signature: String): List<Page>? {
+        val source = _uiState.value.source ?: return null
+        val cached = runCatching { libraryRepository.loadCachedPageOffsets(source, signature) }.getOrNull()
+        return cached?.map { (start, end) -> Page(start, end) }
+    }
+
+    fun onPaginationProgress(fraction: Float) {
+        _uiState.update { it.copy(paginatingProgress = fraction) }
     }
 
     /**
@@ -462,6 +548,7 @@ class ReaderViewModel(
         appendLine("  interval: ${aiPrefs.readingCheckMinutes} min = $checkThresholdWords words")
         appendLine("  words read since last check: $wordsSinceCheck")
         appendLine("  pages read this stretch: ${chunksSinceCheck.size}")
+        appendLine("  pages in this book: ${_uiState.value.chunks.size}")
         appendLine("  questions ready: ${_uiState.value.pendingChecks.size}")
         appendLine("  question due: ${_uiState.value.checkDue}")
         appendLine("  accrual idle (no recent touch): ${_uiState.value.creditIdle}")
@@ -487,9 +574,9 @@ class ReaderViewModel(
     /**
      * The text to ask about: exactly the chunks that were credited, in reading order.
      *
-     * Only credited chunks are ever sent. Text that was scrolled past is not something the reader
-     * read, so asking about it would be unfair - and it keeps the upload to the smallest thing that
-     * answers the question, which matters when the upload is someone's book.
+     * Only pages that passed the reading rules are ever sent. A page turned past too quickly is
+     * not something the reader read, so asking about it would be unfair - and it keeps the upload
+     * to the smallest thing that answers the question, which matters when it is someone's book.
      */
     private fun passageSinceLastCheck(): String {
         val chunks = _uiState.value.chunks
@@ -675,14 +762,6 @@ class ReaderViewModel(
     }
 }
 
-/**
- * Splits the whole book into lazy-list-sized chunks. Splits on paragraph breaks where
- * they exist (PDFs), and caps chunk length (~1600 chars) at a word boundary otherwise
- * (EPUB/MOBI chapter text arrives as long blobs), so no single list item is huge.
- *
- * Chapter boundaries force a chunk break, and the chunk that begins a chapter is tagged with
- * its title so the reader can render a divider there.
- */
 /** How much open/read time to accumulate before writing it to disk. */
 private const val FLUSH_EVERY_MS = 30_000L
 
@@ -692,39 +771,8 @@ private const val PREPARE_FRACTION = 0.75
 /** Bounds what leaves the device, and what the model has to hold in its head at once. */
 private const val MAX_PASSAGE_CHARS = 6_000
 
-fun chunkText(full: String, chapters: List<Chapter> = emptyList()): List<TextChunk> {
-    if (full.isEmpty()) return listOf(TextChunk(0, ""))
-    val maxLen = 1600
-    val chapterAt = HashMap<Int, String>()
-    val boundaries = java.util.TreeSet<Int>()
-    for (c in chapters) {
-        if (c.charOffset in 0 until full.length) {
-            boundaries.add(c.charOffset)
-            // First title wins if two chapters share an offset.
-            chapterAt.putIfAbsent(c.charOffset, c.title)
-        }
-    }
-    val chunks = ArrayList<TextChunk>()
-    var i = 0
-    val n = full.length
-    while (i < n) {
-        var end = full.indexOf('\n', i).let { if (it == -1) n else it + 1 }
-        if (end - i > maxLen) {
-            var cut = i + maxLen
-            val space = full.lastIndexOf(' ', cut)
-            if (space > i) cut = space + 1
-            end = cut
-        }
-        // Never let a chunk span into the next chapter: cut at the boundary so that chapter's
-        // text starts a fresh, tagged chunk.
-        val nextBoundary = boundaries.higher(i)
-        if (nextBoundary != null && nextBoundary < end) end = nextBoundary
-        val body = full.substring(i, end)
-        chunks.add(TextChunk(i, body, chapterAt[i], countWords(body)))
-        i = end
-    }
-    return chunks
-}
+/** Counting a page's words, once, when it is laid out. */
+private val WORD_SPLIT = Regex("\\s+")
 
 /** Counts whitespace-delimited words. Cheap, and only ever run while chunking off the main thread. */
 private fun countWords(text: String): Int {

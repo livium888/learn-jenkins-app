@@ -43,9 +43,16 @@ class FocusPrefs(context: Context) {
         get() = prefs.getInt(KEY_MAX_WPM, 450)
         set(value) = prefs.edit().putInt(KEY_MAX_WPM, value).apply()
 
-    /** Accrual pauses after this long with no scrolling or touching (phone left open). */
+    /**
+     * Accrual pauses after this long with no page turn or touch (phone left open).
+     *
+     * Longer than it was when the reader scrolled. Scrolling generated a touch every second or so,
+     * whereas a page can hold someone's attention for a minute before they turn it - and pausing
+     * mid-page would have meant most pages never counted at all. A phone left open is bounded
+     * anyway now: a page pays once, so an untouched screen earns exactly one page and then stops.
+     */
     var idleTimeoutSeconds: Int
-        get() = prefs.getInt(KEY_IDLE, 60)
+        get() = prefs.getInt(KEY_IDLE, 180)
         set(value) = prefs.edit().putInt(KEY_IDLE, value).apply()
 
     companion object {

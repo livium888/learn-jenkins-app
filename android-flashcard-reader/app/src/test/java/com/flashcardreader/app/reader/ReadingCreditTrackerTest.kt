@@ -204,3 +204,60 @@ class ReadingCreditTrackerTest {
         assertNull("too fast to have been read", ticks.firstOrNull { it.readChunk != null })
     }
 }
+
+/**
+ * Pages are real now, which means page numbers move: change the text size and page 40 is different
+ * text. Anything recorded against a page number would therefore hand back a fresh, unpaid book on
+ * every re-layout - so changing the font twice would mint unlimited Focus Gate credit. Payment is
+ * recorded against position in the text instead, and this is the proof.
+ */
+class PaidTextSurvivesRelayoutTest {
+
+    private val idle = 60_000L
+
+    /** Reads [index] long enough to be paid for, and returns what it earned. */
+    private fun readPage(tracker: ReadingCreditTracker, index: Int, words: Int, startMs: Long): Int {
+        tracker.noteInteraction(startMs)
+        var now = startMs
+        var earned = 0
+        repeat(40) {
+            now += 1_000
+            earned += tracker.tick(now, index, words, 1_000).creditedWords
+        }
+        return earned
+    }
+
+    @Test
+    fun `re-laying the book out does not make paid text payable again`() {
+        val tracker = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        // Three 200-word pages covering chars 0..3000.
+        tracker.setPages(starts = intArrayOf(0, 1000, 2000), ends = intArrayOf(1000, 2000, 3000))
+        assertTrue("reading a page should pay", readPage(tracker, 0, 200, 10_000) > 0)
+
+        // Same book, smaller text: the same characters are now spread over more, shorter pages.
+        val paid = tracker.creditedChunks
+        val relaid = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        relaid.restore(paid)
+        relaid.setPages(starts = intArrayOf(0, 500, 1000, 1500), ends = intArrayOf(500, 1000, 1500, 2000))
+
+        assertEquals(
+            "text already paid for must not pay again just because it moved page",
+            0,
+            readPage(relaid, 0, 100, 10_000),
+        )
+        assertEquals(0, readPage(relaid, 1, 100, 200_000))
+        assertTrue(
+            "text that was never read still pays",
+            readPage(relaid, 2, 100, 400_000) > 0,
+        )
+    }
+
+    @Test
+    fun `with no page map the tracker still works page by page`() {
+        // The unit tests above never set a page map, so this is the behaviour they rely on.
+        val tracker = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        assertTrue(readPage(tracker, 7, 200, 10_000) > 0)
+        assertEquals("a page pays once", 0, readPage(tracker, 7, 200, 200_000))
+        assertTrue("a different page still pays", readPage(tracker, 8, 200, 400_000) > 0)
+    }
+}

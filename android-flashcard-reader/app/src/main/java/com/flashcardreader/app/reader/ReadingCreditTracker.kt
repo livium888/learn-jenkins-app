@@ -54,7 +54,20 @@ class ReadingCreditTracker(
     private val idleTimeoutMs: Long,
 ) {
     private val dwellMs = HashMap<Int, Long>()
+
+    /**
+     * Stretches of the *book* that have already been paid for, as fixed-size buckets of characters.
+     *
+     * Keyed by position in the text rather than by page number, because page numbers are not
+     * stable: changing the font size re-lays the whole book out, and page 40 becomes different
+     * text. Keyed by page, every re-layout would hand back a fresh, unpaid book - so changing the
+     * text size twice would be a way to mint unlimited credit. Characters do not move.
+     */
     private val credited = HashSet<Int>()
+
+    /** Where each page starts and ends in the book, so a page can be mapped to its buckets. */
+    private var pageStarts: IntArray = IntArray(0)
+    private var pageEnds: IntArray = IntArray(0)
 
     /**
      * Pages read properly *this session*, including ones already paid for previously. Not persisted
@@ -64,12 +77,32 @@ class ReadingCreditTracker(
     private var lastInteractionAt = 0L
     private var bucketWords = 0f
 
-    /** Pages already paid for in an earlier session, loaded from the book's sidecar. */
+    /** Stretches already paid for in an earlier session, loaded from the book's sidecar. */
     fun restore(previouslyCredited: Set<Int>) {
         credited.addAll(previouslyCredited)
     }
 
+    /**
+     * Tells the tracker where the pages fall, so payout can be recorded against the text rather
+     * than against a page number. Called again after every re-layout.
+     *
+     * With no page map (as in the unit tests) the page index is used as its own bucket, which
+     * keeps the anti-fake rules testable without a book.
+     */
+    fun setPages(starts: IntArray, ends: IntArray) {
+        pageStarts = starts
+        pageEnds = ends
+    }
+
     val creditedChunks: Set<Int> get() = credited
+
+    /** The buckets of book text a page covers. */
+    private fun bucketsFor(index: Int): IntRange {
+        if (index !in pageStarts.indices) return index..index
+        val from = pageStarts[index] / CREDIT_BUCKET_CHARS
+        val to = (pageEnds[index] - 1).coerceAtLeast(pageStarts[index]) / CREDIT_BUCKET_CHARS
+        return from..to
+    }
 
     /** Called on a real touch (drag, tap, long-press) - never for programmatic/auto-scroll. */
     fun noteInteraction(nowMs: Long) {
@@ -109,12 +142,13 @@ class ReadingCreditTracker(
         val readWords = if (firstReadThisSession) wordCount else 0
 
         // Paying out is the part that stays once-ever, and the part the rate cap governs.
-        if (focusedChunk in credited || bucketWords < wordCount) {
+        val buckets = bucketsFor(focusedChunk)
+        if (buckets.all { it in credited } || bucketWords < wordCount) {
             return CreditTick(readChunk = read, readWords = readWords)
         }
 
         bucketWords -= wordCount
-        credited.add(focusedChunk)
+        buckets.forEach { credited.add(it) }
         return CreditTick(
             creditedChunk = focusedChunk,
             creditedWords = wordCount,
@@ -128,13 +162,21 @@ class ReadingCreditTracker(
         (words * 60_000L / cap).coerceAtLeast(MIN_DWELL_MS)
 
     companion object {
-        /** Skip blank-line and one-word chunks; chunkText can emit a chunk that is just a newline. */
+        /** Skip a page holding almost nothing - a chapter end, or a page that is mostly a heading. */
         const val MIN_WORDS = 5
         const val MIN_DWELL_MS = 1_500L
         /** An ordinary reading pace, used to price a page in seconds of earned access. */
         const val TYPICAL_WPM = 240
         /** Stops the bucket hoarding budget during a long dwell and then paying out in a burst. */
         const val MAX_BUCKET_WORDS = 1_500f
+
+        /**
+         * How finely paid-for text is recorded, in characters.
+         *
+         * Small enough that a page maps to only a few buckets, so re-laying the book out cannot
+         * hand back much unpaid text; large enough that a book's record stays small.
+         */
+        const val CREDIT_BUCKET_CHARS = 400
 
         /** What a page of [words] is worth, in seconds of reading value. */
         fun contentValueSeconds(words: Int): Long = words * 60L / TYPICAL_WPM
