@@ -20,34 +20,29 @@ package com.flashcardreader.app.reader
 internal data class ReaderOverlays(
     val showFlashcard: Boolean,
     val showReadingCheck: Boolean,
-    val showComprehension: Boolean,
     val inMultiWindow: Boolean,
 ) {
     /** True when nothing should be earning reading credit right now. */
     val coversText: Boolean
-        get() = showFlashcard || showReadingCheck || showComprehension || inMultiWindow
+        get() = showFlashcard || showReadingCheck || inMultiWindow
 }
 
 /**
  * Works out what should be on screen, in the order the reader prioritises them: a due flashcard
- * first, then a question about the passage just read, and the generic recall prompt only when
- * there is no real question to ask instead.
+ * first, then a question about the passage just read.
  */
 internal fun readerOverlays(
     pendingFlashcards: Int,
     pendingChecks: Int,
     checkDue: Boolean,
-    pendingComprehension: Boolean,
     inMultiWindow: Boolean,
 ): ReaderOverlays {
     val showFlashcard = pendingFlashcards > 0
     // Prepared but not yet due is not shown - and so must not stop the reading that makes it due.
     val showReadingCheck = !showFlashcard && pendingChecks > 0 && checkDue
-    val showComprehension = !showFlashcard && !showReadingCheck && pendingComprehension
     return ReaderOverlays(
         showFlashcard = showFlashcard,
         showReadingCheck = showReadingCheck,
-        showComprehension = showComprehension,
         inMultiWindow = inMultiWindow,
     )
 }

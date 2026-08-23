@@ -9,7 +9,19 @@ import kotlin.math.roundToInt
  * list (to show each card's current schedule).
  */
 object IntervalFormat {
-    private val fsrs = Fsrs()
+    /**
+     * The scheduler these labels describe. Set once from the app container.
+     *
+     * It used to be a private `Fsrs()` with the *published default* weights, so once weights had
+     * been fitted to this person the "3 d" on a rating button was not the interval that would
+     * actually be applied. A settable property is not lovely, but the alternative is threading a
+     * scheduler through two ViewModels and two Composables to print a label - and a label that
+     * quietly lies about the schedule is the worse trade.
+     */
+    @Volatile
+    var scheduler: Fsrs = Fsrs()
+
+    private val fsrs: Fsrs get() = scheduler
 
     /** Time until this term would next be due if answered [rating] right now, e.g. "3 d". */
     fun nextLabel(term: Term, rating: Rating): String {

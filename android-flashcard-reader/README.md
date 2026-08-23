@@ -53,7 +53,17 @@ app/src/main/java/com/flashcardreader/app/
   library, `libmobi`, is C/LGPL - pulling that in means an NDK build and real
   licensing questions for very little payoff, so this format gets a small,
   self-contained, from-spec parser instead. See caveats below.
-- Global term database with a real FSRS (v4.5-style DSR model) scheduler.
+- Global term database with a real FSRS (v4.5-style DSR model) scheduler, whose
+  initial-stability weights are **re-fitted to your own review history** once
+  there is enough of it (`data/fsrs/FsrsOptimizer.kt`).
+- **Reading checks**: multiple-choice comprehension questions written by Gemini
+  from passages you genuinely read, validated against the text before they are
+  ever shown, and scheduled like any other card.
+- **Verified reading**: an anti-fake tracker that can tell reading from
+  scrolling, used to earn Focus Gate time and to decide when to ask a question.
+- Free-book catalogues (Project Gutenberg, Standard Ebooks, Wikisource, any
+  OPDS feed), backup/restore, and a crash reporter that shows the last stack
+  trace on the next launch.
 - Paginated reflowable reader with font/size/line-height/theme controls.
 - Text selection -> flashcard creation flow (select text, tap system "Copy",
   tap "Add Flashcard" - prefills from the clipboard, editable before saving).
@@ -74,11 +84,11 @@ app/src/main/java/com/flashcardreader/app/
   original layout. Scanned (image-only) PDFs and multi-column academic
   papers will extract poorly or blank - a page-image fallback view is a
   reasonable follow-up, not implemented here.
-- **FSRS parameters are the published defaults**, not optimized against real
-  usage. FSRS is designed to be refit periodically once there's real review
-  history (a few hundred reviews) for materially better scheduling - that
-  optimizer isn't implemented yet.
-- No automated tests yet.
+- **Comprehension questions need a Gemini API key.** Reading checks are written
+  by the model from passages you actually read; without a key the reader still
+  works, it just never asks anything.
+- **PDFs have no chapter structure**, so anything keyed to chapters is absent
+  for them.
 
 ## Building
 
@@ -87,12 +97,12 @@ Requires Android Studio (Koala+) or a local Android SDK. Open this
 it will handle the Gradle wrapper JAR automatically. Minimum SDK 26, target/
 compile SDK 34, Kotlin 1.9.24, Jetpack Compose.
 
-**This has not been build-verified against a real Gradle/Android toolchain.**
-The sandboxed environment this was written in blocks `dl.google.com` at the
-network policy level, which is where AGP, AndroidX, Compose, and Room are all
-hosted (and how the Android SDK itself is fetched) - so no Gradle sync, let
-alone a build, could be run here. Every file has had a careful manual
-line-by-line review instead (import correctness, API signatures, exhaustive
-`when`s, etc.), but a real `Gradle sync` + `assembleDebug` in Android Studio
-is the first thing to do, and is very likely to surface a few things a human
-reviewer would need to fix.
+**The environment this is written in cannot build Android**: it blocks
+`dl.google.com`, which is where AGP, AndroidX, Compose and Room are hosted and
+how the SDK itself is fetched. So GitHub Actions is the only compiler - see
+`.github/workflows/android-flashcard-reader.yml`, which runs the unit tests,
+builds a signed release APK, renders the Compose screens to PNG with Paparazzi,
+and publishes the APK to a GitHub Release. Pure-Kotlin logic (the credit
+tracker, FSRS, the AI response validators, the backup format) is deliberately
+kept free of Android imports so it can also be compiled and tested locally with
+`kotlinc`, which is how most of it is checked before CI ever sees it.

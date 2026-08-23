@@ -26,12 +26,27 @@ class ReviewReminderWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        val dueCount = AppDatabase.get(applicationContext).termDao().getDue(System.currentTimeMillis()).size
-        if (dueCount > 0) notifyDue(applicationContext, dueCount)
+        val now = System.currentTimeMillis()
+        val db = AppDatabase.get(applicationContext)
+        val words = db.termDao().getDue(now).size
+        // Comprehension questions are cards on the same schedule, and were being left out - so a
+        // day with nothing but questions due looked to the reminder like a day with nothing due.
+        val questions = runCatching { db.readingCheckDao().dueCount(now) }.getOrDefault(0)
+        if (words + questions > 0) notifyDue(applicationContext, words, questions)
         return Result.success()
     }
 
-    private fun notifyDue(context: Context, count: Int) {
+    /** "3 words and 2 questions due", saying only what is actually there. */
+    private fun dueSummary(words: Int, questions: Int): String {
+        val parts = buildList {
+            if (words > 0) add("$words word${if (words == 1) "" else "s"}")
+            if (questions > 0) add("$questions question${if (questions == 1) "" else "s"}")
+        }
+        return parts.joinToString(" and ") + " due for review"
+    }
+
+    private fun notifyDue(context: Context, words: Int, questions: Int) {
+        val count = words + questions
         val channelId = "review-reminders"
         val manager = context.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -48,7 +63,7 @@ class ReviewReminderWorker(
 
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("$count word${if (count == 1) "" else "s"} due for review")
+            .setContentTitle(dueSummary(words, questions))
             .setContentText("A quick review now helps them stick through sleep.")
             .setContentIntent(pending)
             .setAutoCancel(true)

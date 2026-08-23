@@ -3,6 +3,11 @@
   Auto Backup + device-to-device transfer rules for Android 12+ (dataExtractionRules).
   Same intent as backup_rules.xml: exclude the AI-tutor stores (which hold the Gemini API key)
   from both cloud backup and phone-to-phone transfer, while everything else carries over.
+
+  Book text is excluded too. The app asks before sending pages to Gemini and then let whole books -
+  personal documents included - go to Google's cloud silently, which was inconsistent with itself.
+  The Room database still backs up, so words, questions and review history survive a reinstall;
+  only the books themselves need re-importing.
 -->
 <data-extraction-rules>
     <cloud-backup>
@@ -13,6 +18,8 @@
         <exclude domain="sharedpref" path="catalog_credentials.xml" />
         <exclude domain="sharedpref" path="catalog_credentials_secure.xml" />
         <exclude domain="sharedpref" path="reading_log.xml" />
+        <exclude domain="file" path="sources" />
+        <exclude domain="file" path="flagged-questions.json" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="ai_prefs.xml" />
@@ -22,5 +29,7 @@
         <exclude domain="sharedpref" path="catalog_credentials.xml" />
         <exclude domain="sharedpref" path="catalog_credentials_secure.xml" />
         <exclude domain="sharedpref" path="reading_log.xml" />
+        <exclude domain="file" path="sources" />
+        <exclude domain="file" path="flagged-questions.json" />
     </device-transfer>
 </data-extraction-rules>

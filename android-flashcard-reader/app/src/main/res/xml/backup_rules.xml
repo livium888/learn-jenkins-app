@@ -3,6 +3,11 @@
   Auto Backup rules for Android 11 and below (fullBackupContent). Everything is backed up by
   default (so flashcards/reading state survive a reinstall) EXCEPT the AI-tutor stores, which
   hold the Gemini API key. Keeping a credential out of the cloud backup is the point.
+
+  Book text is excluded too. The app asks before sending pages to Gemini and then let whole books -
+  personal documents included - go to Google's cloud silently, which was inconsistent with itself.
+  The Room database still backs up, so words, questions and review history survive a reinstall;
+  only the books themselves need re-importing.
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="ai_prefs.xml" />
@@ -12,4 +17,6 @@
     <exclude domain="sharedpref" path="catalog_credentials.xml" />
     <exclude domain="sharedpref" path="catalog_credentials_secure.xml" />
     <exclude domain="sharedpref" path="reading_log.xml" />
+    <exclude domain="file" path="sources" />
+    <exclude domain="file" path="flagged-questions.json" />
 </full-backup-content>

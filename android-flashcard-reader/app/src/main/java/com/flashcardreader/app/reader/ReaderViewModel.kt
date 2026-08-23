@@ -70,8 +70,6 @@ data class ReaderUiState(
     val initialChunkIndex: Int = 0,
     /** Due flashcards to answer before continuing. Shown as a blocking dialog. */
     val pendingFlashcards: List<TermMatch> = emptyList(),
-    /** True when it's time for a comprehension free-recall check (after a stretch of reading). */
-    val pendingComprehension: Boolean = false,
     val typography: ReaderTypography = ReaderTypography(),
     val loading: Boolean = true,
     /** True when Focus Gate accrual has paused because nobody has touched the screen for a while. */
@@ -126,10 +124,6 @@ class ReaderViewModel(
     /** Chunks already scanned for due terms, so continued scrolling doesn't rescan them. */
     private val scannedChunks = mutableSetOf<Int>()
     private var lastPersistedChunk = -1
-
-    /** Char offset of the last comprehension prompt, so we prompt again after a stretch of reading. */
-    private var lastRecallOffset = 0
-    private val recallThresholdChars = 12000
 
     /**
      * Words of *verified* reading banked since the last check, and the chunks they came from.
@@ -199,8 +193,6 @@ class ReaderViewModel(
             val startIndex = source?.let { src ->
                 chunks.indexOfFirst { it.endChar > src.lastPositionChar }.let { if (it < 0) 0 else it }
             } ?: 0
-            val startOffset = chunks.getOrNull(startIndex)?.startChar ?: 0
-            lastRecallOffset = startOffset
             _uiState.update {
                 it.copy(
                     source = source, fullText = text, terms = terms, chunks = chunks,
@@ -234,7 +226,7 @@ class ReaderViewModel(
             }
         }
 
-        if (state.pendingFlashcards.isNotEmpty() || state.pendingComprehension) return // one prompt at a time
+        if (state.pendingFlashcards.isNotEmpty()) return // one prompt at a time
 
         // Claim the not-yet-scanned chunks now (set.add returns false if already claimed),
         // so a burst of scroll callbacks doesn't scan the same chunk on several threads.
@@ -242,11 +234,7 @@ class ReaderViewModel(
         for (idx in firstVisible..lastVisible) {
             if (scannedChunks.add(idx)) toScan.add(idx)
         }
-        val firstStart = state.chunks.getOrNull(firstVisible)?.startChar ?: 0
-        if (toScan.isEmpty()) {
-            maybePromptComprehension(firstStart)
-            return
-        }
+        if (toScan.isEmpty()) return
 
         viewModelScope.launch(Dispatchers.Default) {
             val now = System.currentTimeMillis()
@@ -275,33 +263,14 @@ class ReaderViewModel(
             termRepository.logOccurrences(logs)
             withContext(Dispatchers.Main) {
                 // Re-check on the main thread: another scan may have queued a prompt meanwhile.
-                if (_uiState.value.pendingFlashcards.isNotEmpty() || _uiState.value.pendingComprehension) {
-                    return@withContext
-                }
+                if (_uiState.value.pendingFlashcards.isNotEmpty()) return@withContext
                 if (due.isNotEmpty()) {
                     val seen = HashSet<Long>()
                     val queue = due.filter { seen.add(it.term.id) }
                     _uiState.update { it.copy(pendingFlashcards = queue) }
-                } else {
-                    // No flashcard due here - after a stretch of new reading, prompt a comprehension
-                    // free-recall ("what was this about?"), the strongest study technique for prose.
-                    maybePromptComprehension(firstStart)
                 }
             }
         }
-    }
-
-    /** Prompts a free-recall check once a stretch of new text has been read past the last one. */
-    private fun maybePromptComprehension(firstStart: Int) {
-        if (firstStart - lastRecallOffset >= recallThresholdChars) {
-            lastRecallOffset = firstStart
-            _uiState.update { it.copy(pendingComprehension = true) }
-        }
-    }
-
-    fun dismissComprehension() {
-        onReadingInteraction()
-        _uiState.update { it.copy(pendingComprehension = false) }
     }
 
     /**

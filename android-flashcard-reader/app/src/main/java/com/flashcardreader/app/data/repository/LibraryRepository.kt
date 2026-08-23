@@ -231,6 +231,12 @@ class LibraryRepository(
             throw e // never swallow coroutine cancellation
         } catch (e: OutOfMemoryError) {
             throw IllegalStateException("That file is too large or complex to open on this device.")
+        } catch (e: IllegalStateException) {
+            // The parsers throw this deliberately, with a message that says what is actually wrong:
+            // Kindle DRM, an unsupported MOBI compression scheme, a PDF with no text layer. Those
+            // were being replaced with "it may be corrupted", which sends someone off to repair a
+            // file that is not broken. Anything a parser states on purpose is passed through.
+            throw e
         } catch (e: Exception) {
             throw IllegalStateException("Couldn't read that file - it may be corrupted or password-protected.")
         }

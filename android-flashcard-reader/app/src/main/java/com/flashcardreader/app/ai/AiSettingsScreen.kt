@@ -207,10 +207,23 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    "Stored only on this device. Get a free key at aistudio.google.com/apikey.",
+                    "Stored only on this device, encrypted, and kept out of cloud backup. " +
+                        "Get a free key at aistudio.google.com/apikey.",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Said out loud rather than swallowed: if the Keystore-backed store could not be
+                // opened, the key is sitting in plain text, and only the person it belongs to can
+                // decide whether that is acceptable on this device.
+                AiPrefs.encryptionFailure?.let { reason ->
+                    Text(
+                        "Encryption is unavailable on this device ($reason), so the key is being " +
+                            "stored in plain text. It is still kept out of cloud backup. If that " +
+                            "isn't acceptable, clear the key here and use the app without AI.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 OutlinedTextField(
                     value = language,
                     onValueChange = { language = it; prefs.myLanguage = it },

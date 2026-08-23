@@ -124,8 +124,22 @@ class AiPrefs(context: Context) {
             migratePlaintextKey(context, secure)
             secure
         } catch (e: Exception) {
+            // Keystore-backed prefs can fail to open - a corrupted keyset, a device whose Keystore
+            // has been reset. The fallback below is plaintext, which is a real downgrade, and one
+            // the person whose key it is deserves to know about rather than discover.
+            encryptionFailure = e.javaClass.simpleName
             null
         }
+
+        /**
+         * Set when encryption could not be used and the key is being kept in plain text.
+         *
+         * Surfaced in AI settings. A silent security downgrade is worse than a loud one: nobody
+         * can decide to remove their key from a device they no longer trust if nothing says so.
+         */
+        @Volatile
+        var encryptionFailure: String? = null
+            private set
 
         private fun migratePlaintextKey(context: Context, secure: SharedPreferences) {
             val plain = plainPrefs(context)

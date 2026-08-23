@@ -22,7 +22,6 @@ class ReaderOverlaysTest {
             pendingFlashcards = 0,
             pendingChecks = 2,
             checkDue = false,
-            pendingComprehension = false,
             inMultiWindow = false,
         )
         assertFalse("nothing is drawn, so nothing covers the text", overlays.coversText)
@@ -35,7 +34,6 @@ class ReaderOverlaysTest {
             pendingFlashcards = 0,
             pendingChecks = 1,
             checkDue = true,
-            pendingComprehension = false,
             inMultiWindow = false,
         )
         assertTrue(overlays.showReadingCheck)
@@ -45,16 +43,13 @@ class ReaderOverlaysTest {
     @Test
     fun `anything shown covers the text, and nothing shown does not`() {
         // The invariant the deadlock broke: these two answers come from one place and must agree.
-        val nothing = readerOverlays(0, 0, checkDue = false, pendingComprehension = false, inMultiWindow = false)
+        val nothing = readerOverlays(0, 0, checkDue = false, inMultiWindow = false)
         assertFalse(nothing.coversText)
 
-        val flashcard = readerOverlays(1, 0, checkDue = false, pendingComprehension = false, inMultiWindow = false)
+        val flashcard = readerOverlays(1, 0, checkDue = false, inMultiWindow = false)
         assertTrue(flashcard.showFlashcard)
         assertTrue(flashcard.coversText)
 
-        val recall = readerOverlays(0, 0, checkDue = false, pendingComprehension = true, inMultiWindow = false)
-        assertTrue(recall.showComprehension)
-        assertTrue(recall.coversText)
     }
 
     @Test
@@ -63,33 +58,17 @@ class ReaderOverlaysTest {
             pendingFlashcards = 1,
             pendingChecks = 1,
             checkDue = true,
-            pendingComprehension = true,
             inMultiWindow = false,
         )
         assertTrue(overlays.showFlashcard)
         assertFalse("only one prompt at a time", overlays.showReadingCheck)
-        assertFalse(overlays.showComprehension)
-    }
-
-    @Test
-    fun `a real question beats the generic recall prompt`() {
-        val overlays = readerOverlays(
-            pendingFlashcards = 0,
-            pendingChecks = 1,
-            checkDue = true,
-            pendingComprehension = true,
-            inMultiWindow = false,
-        )
-        assertTrue(overlays.showReadingCheck)
-        assertFalse(overlays.showComprehension)
     }
 
     @Test
     fun `split-screen stops accrual without drawing anything`() {
-        val overlays = readerOverlays(0, 0, checkDue = false, pendingComprehension = false, inMultiWindow = true)
+        val overlays = readerOverlays(0, 0, checkDue = false, inMultiWindow = true)
         assertTrue(overlays.coversText)
         assertFalse(overlays.showFlashcard)
         assertFalse(overlays.showReadingCheck)
-        assertFalse(overlays.showComprehension)
     }
 }

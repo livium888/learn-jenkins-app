@@ -8,6 +8,7 @@ import com.flashcardreader.app.data.repository.CalibrationStore
 import com.flashcardreader.app.diagnostics.CrashLog
 import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.fsrs.Fsrs
+import com.flashcardreader.app.data.fsrs.IntervalFormat
 import com.flashcardreader.app.data.repository.ReadingCheckRepository
 import com.flashcardreader.app.data.repository.ReviewHistory
 import com.flashcardreader.app.data.repository.ReadingLog
@@ -27,6 +28,10 @@ class FlashcardReaderApp : Application() {
         // Installed first, before anything else can throw - a handler registered after the failing
         // code would miss exactly the crashes worth catching.
         crashLog.install(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+        // So the "next due" labels on the rating buttons describe the schedule that will actually
+        // be applied, rather than FSRS's published defaults. Cheap: Fsrs only holds a lambda here,
+        // and the weights behind it are not read until a label or a review asks for them.
+        IntervalFormat.scheduler = fsrs
     }
 
     val database by lazy { AppDatabase.get(this) }
@@ -34,7 +39,7 @@ class FlashcardReaderApp : Application() {
     val reviewHistory by lazy { ReviewHistory(this, database.reviewLogDao()) }
 
     /** Scheduled with weights fitted to this device's own review history, when there are any. */
-    private val fsrs by lazy { Fsrs(fittedInitialStability = reviewHistory.fittedInitialStability()) }
+    private val fsrs = Fsrs(fittedInitialStability = { reviewHistory.fittedInitialStability() })
 
     val termRepository by lazy {
         TermRepository(database.termDao(), database.occurrenceDao(), calibration, fsrs, reviewHistory)

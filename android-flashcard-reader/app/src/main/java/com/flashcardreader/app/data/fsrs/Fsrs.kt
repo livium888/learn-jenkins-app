@@ -36,8 +36,13 @@ class Fsrs(
      *
      * Empty means "use the published defaults", which is the right cold start and stays the right
      * answer until there is enough history to beat it - see FsrsOptimizer.
+     *
+     * A function rather than a map, and that is the whole point: it used to be read once when the
+     * app container built its scheduler, so a refit wrote new weights that nothing ever read again
+     * until the process was restarted. Asked for per review, a refit takes effect immediately.
+     * SharedPreferences is memory-backed after its first load, so this is not a disk read per card.
      */
-    private val fittedInitialStability: Map<Rating, Double> = emptyMap(),
+    private val fittedInitialStability: () -> Map<Rating, Double> = { emptyMap() },
 ) {
 
     companion object {
@@ -64,7 +69,7 @@ class Fsrs(
         (stability / FACTOR) * (requestRetention.pow(1.0 / DECAY) - 1.0)
 
     private fun initStability(rating: Rating): Double =
-        (fittedInitialStability[rating] ?: W[rating.value - 1]).coerceAtLeast(0.1)
+        (fittedInitialStability()[rating] ?: W[rating.value - 1]).coerceAtLeast(0.1)
 
     private fun initDifficulty(rating: Rating): Double =
         (W[4] - (rating.value - 3) * W[5]).coerceIn(1.0, 10.0)

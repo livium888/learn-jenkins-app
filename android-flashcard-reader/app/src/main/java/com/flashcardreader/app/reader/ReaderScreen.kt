@@ -278,7 +278,6 @@ fun ReaderScreen(
                             pendingFlashcards = live.pendingFlashcards.size,
                             pendingChecks = live.pendingChecks.size,
                             checkDue = live.checkDue,
-                            pendingComprehension = live.pendingComprehension,
                             inMultiWindow = activity?.isInMultiWindowMode == true,
                         )
                         viewModel.onReadingTick(
@@ -354,7 +353,6 @@ fun ReaderScreen(
         pendingFlashcards = state.pendingFlashcards.size,
         pendingChecks = state.pendingChecks.size,
         checkDue = state.checkDue,
-        pendingComprehension = state.pendingComprehension,
         // Only about what is drawn here; split-screen changes nothing on screen.
         inMultiWindow = false,
     )
@@ -382,8 +380,6 @@ fun ReaderScreen(
             position = if (state.pendingChecks.size > 1) state.checkIndex + 1 else null,
             total = state.pendingChecks.size,
         )
-    } else if (overlays.showComprehension) {
-        ComprehensionDialog(onDone = viewModel::dismissComprehension)
     }
 
     if (showSettings) {
