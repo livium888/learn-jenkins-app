@@ -5,4 +5,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization") version "1.9.24" apply false
     id("com.google.devtools.ksp") version "1.9.24-1.0.20" apply false
     id("androidx.baselineprofile") version "1.3.3" apply false
+    // Renders Compose on the JVM so screens can be seen without a device or emulator.
+    id("app.cash.paparazzi") version "1.3.5" apply false
 }

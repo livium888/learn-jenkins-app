@@ -12,11 +12,15 @@ import kotlinx.coroutines.withContext
  * PDF is fixed-layout, not reflowable, so there is no "correct" paragraph
  * structure to recover - we extract the raw text stream page by page and let
  * the reader reflow it. This works well for novel-like single-column PDFs.
- * Scanned PDFs (image-only, no text layer) and complex multi-column layouts
- * (e.g. academic papers) will extract poorly or come out empty/jumbled; a
- * page-image fallback view for those is a reasonable follow-up but is not
- * implemented here.
+ * A scanned PDF (image-only, no text layer) has nothing to extract this way, and raises
+ * [ScannedPdfException] so the caller can offer optical character recognition instead - see PdfOcr.
+ * Complex multi-column layouts (e.g. academic papers) still extract poorly.
  */
+/** Raised when a PDF has no text layer at all - the case OCR exists for. */
+class ScannedPdfException(val pageCount: Int) : IllegalStateException(
+    "This PDF looks scanned - images with no text layer - so there is no text to pull out of it.",
+)
+
 class PdfParser : FileDocumentParser {
     override suspend fun parse(context: Context, uri: Uri, displayName: String): ParsedDocument =
         withContext(Dispatchers.IO) {
@@ -35,10 +39,9 @@ class PdfParser : FileDocumentParser {
                     // nothing. Fail with a clear message instead of opening a blank reader.
                     val pages = document.numberOfPages.coerceAtLeast(1)
                     if (text.length < pages * 2 && text.length < 200) {
-                        throw IllegalStateException(
-                            "This PDF looks scanned (images with no text layer), so there's no text to read. " +
-                                "Try an EPUB, or a PDF exported with real text.",
-                        )
+                        // Distinguishable from any other import failure, so the library can offer
+                        // to read it with OCR rather than just reporting that it didn't work.
+                        throw ScannedPdfException(pages)
                     }
 
                     ParsedDocument(

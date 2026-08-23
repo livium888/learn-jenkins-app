@@ -43,6 +43,27 @@ jobs:
       - name: Build release APK
         run: ./gradlew assembleRelease
 
+      # Renders the Compose screens to PNG on the JVM and keeps them as an artifact.
+      #
+      # Deliberately after the APK is published and marked continue-on-error: the Android SDK is
+      # unreachable from where this app is written, so this is the only way anyone writing it can
+      # see the layout - but that is a diagnostic luxury, and it must never be the reason a working
+      # build fails to reach a phone. Records rather than verifies, because there are no golden
+      # images to compare against yet; commit a set from a run to start failing on visual change.
+      - name: Render screenshots
+        if: always()
+        continue-on-error: true
+        run: ./gradlew -Psnapshots recordPaparazziRelease
+
+      - name: Upload screenshots
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: android-flashcard-reader/app/src/test/snapshots/**/*.png
+          if-no-files-found: warn
+
       # Repeats just the compiler errors and failed test names at the end of the log, where
       # they can be read without scrolling past the whole build.
       - name: Summarise failures

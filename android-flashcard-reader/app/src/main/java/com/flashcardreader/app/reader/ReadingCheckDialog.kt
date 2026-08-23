@@ -2,6 +2,7 @@ package com.flashcardreader.app.reader
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -51,70 +52,117 @@ fun ReadingCheckDialog(
     val options = remember(check) { (check.distractors + check.correctAnswer).shuffled() }
     var chosen by remember(check) { mutableStateOf<String?>(null) }
     val answered = chosen != null
-    val correct = chosen == check.correctAnswer
 
     AppDialog(onDismiss = onSkip, dismissible = !answered) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        ReadingCheckBody(
+            check = check,
+            options = options,
+            chosen = chosen,
+            remaining = remaining,
+            onChoose = { chosen = it },
+            onContinue = { onAnswered(chosen == check.correctAnswer) },
+            onSkip = onSkip,
+        )
+    }
+}
+
+/**
+ * The card's contents, with no dialog around them and no state of its own.
+ *
+ * Split out so it can be rendered to a PNG on the JVM (see ScreenSnapshotTest): Paparazzi cannot
+ * draw a real dialog window, and until now this layout had never been seen by anyone writing it -
+ * only described in source and reported back from a phone.
+ */
+@Composable
+internal fun ColumnScope.ReadingCheckBody(
+    check: ReadingCheck,
+    options: List<String>,
+    chosen: String?,
+    remaining: Int?,
+    onChoose: (String) -> Unit,
+    onContinue: () -> Unit,
+    onSkip: () -> Unit,
+) {
+    val answered = chosen != null
+    val correct = chosen == check.correctAnswer
+
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (remaining == null) "WHAT YOU JUST READ" else "FROM YOUR READING",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        if (remaining != null) {
             Text(
-                if (remaining == null) "WHAT YOU JUST READ" else "FROM YOUR READING",
+                "$remaining left",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
             )
-            if (remaining != null) {
-                Text(
-                    "$remaining left",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
-        Text(check.question, style = MaterialTheme.typography.titleMedium)
+    }
+    Text(check.question, style = MaterialTheme.typography.titleMedium)
 
-        Column(verticalArrangement = Arrangement.spacedBy(Spacing.tight)) {
-            options.forEach { option ->
-                OptionRow(
-                    text = option,
-                    state = when {
-                        !answered -> OptionState.UNANSWERED
-                        option == check.correctAnswer -> OptionState.CORRECT
-                        option == chosen -> OptionState.WRONG
-                        else -> OptionState.MUTED
-                    },
-                    onClick = { if (!answered) chosen = option },
-                )
-            }
-        }
-
-        if (answered) {
-            Text(
-                if (correct) "That's right." else "Not quite — here's where it says so:",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (correct) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.tight)) {
+        options.forEach { option ->
+            OptionRow(
+                text = option,
+                state = when {
+                    !answered -> OptionState.UNANSWERED
+                    option == check.correctAnswer -> OptionState.CORRECT
+                    option == chosen -> OptionState.WRONG
+                    else -> OptionState.MUTED
                 },
+                onClick = { if (!answered) onChoose(option) },
             )
-            // Shown on a miss, when it teaches; hidden on a hit, where it would just be clutter.
-            if (!correct) {
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        "“${check.evidence}”",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontStyle = FontStyle.Italic,
-                        modifier = Modifier.padding(Spacing.gap),
-                    )
-                }
-            }
-            PrimaryButton(text = "Keep reading", onClick = { onAnswered(correct) })
-        } else {
-            OutlineButton(text = "Skip", onClick = onSkip)
         }
+    }
+
+    if (answered) {
+        Text(
+            if (correct) "That's right." else "Not quite — here's where it says so:",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (correct) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        // Shown on a miss, when it teaches; hidden on a hit, where it would just be clutter.
+        if (!correct) {
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "“${check.evidence}”",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontStyle = FontStyle.Italic,
+                    modifier = Modifier.padding(Spacing.gap),
+                )
+            }
+        }
+        PrimaryButton(text = "Keep reading", onClick = onContinue)
+    } else {
+        OutlineButton(text = "Skip", onClick = onSkip)
+    }
+}
+
+/** Renders the card in a fixed state for screenshots, with nothing wired up. */
+@Composable
+internal fun ReadingCheckPreviewBody(check: ReadingCheck, chosen: String?) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.gap)) {
+        ReadingCheckBody(
+            check = check,
+            // Fixed order rather than shuffled: a snapshot that moves every run compares to nothing.
+            options = check.distractors + check.correctAnswer,
+            chosen = chosen,
+            remaining = null,
+            onChoose = {},
+            onContinue = {},
+            onSkip = {},
+        )
     }
 }
 

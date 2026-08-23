@@ -119,11 +119,27 @@ fun LibraryScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (uiState.importing) {
-                Row(
+                Column(
                     Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     CircularProgressIndicator()
+                    // Recognising a scan takes minutes, so it says where it has got to. A bare
+                    // spinner for that long is indistinguishable from a hang.
+                    val progress = uiState.ocrProgress
+                    when {
+                        uiState.downloadingOcrData -> Text(
+                            "Downloading the text recogniser…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        progress != null -> Text(
+                            "Reading page ${progress.page} of ${progress.totalPages}…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
@@ -148,6 +164,30 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+
+    // A scan is offered rather than refused: it can be read, it just takes minutes and the first
+    // one has a download attached. Both facts are stated before anything starts.
+    uiState.scannedPdf?.let { offer ->
+        ConfirmDialog(
+            title = "Read this scan with text recognition?",
+            message = buildString {
+                append("“${offer.displayName}” has no text layer — it is ${offer.pageCount} page")
+                if (offer.pageCount != 1) append("s")
+                append(" of images. It can still be read by recognising the text on each page, ")
+                append("which takes a few seconds per page and gets the occasional word wrong.")
+                if (!offer.dataReady) {
+                    append("
+
+This is the first time, so about ")
+                    append(com.flashcardreader.app.data.parser.PdfOcr.APPROX_DOWNLOAD_MB)
+                    append(" MB of recognition data will be downloaded first. It is kept for next time.")
+                }
+            },
+            confirmLabel = "Read it",
+            onConfirm = { viewModel.readScannedPdf() },
+            onDismiss = { viewModel.dismissScannedPdf() },
+        )
     }
 
     pendingDelete?.let { source ->

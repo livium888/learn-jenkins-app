@@ -210,6 +210,35 @@ class LibraryRepository(
      * parse failures (including [OutOfMemoryError]) are turned into a friendly message instead of a
      * crash, and the extracted text is length-capped so one pathological book can't exhaust memory.
      */
+    /**
+     * Imports a scanned PDF by reading its pages with optical character recognition.
+     *
+     * Separate from [importFromFile] because it is a different bargain: minutes rather than
+     * seconds, and imperfect text rather than exact. Only offered once the ordinary route has
+     * already established there is no text layer to read.
+     */
+    suspend fun importScannedPdf(
+        uri: Uri,
+        displayName: String,
+        ocr: com.flashcardreader.app.data.parser.PdfOcr,
+        onProgress: (com.flashcardreader.app.data.parser.OcrProgress) -> Unit = {},
+    ): Source = withContext(Dispatchers.IO) {
+        val text = ocr.extract(uri, onProgress = onProgress)
+        if (text.isBlank()) {
+            throw IllegalStateException(
+                "Nothing readable came out of those pages. The scan may be too faint or at an angle.",
+            )
+        }
+        val capped = if (text.length > MAX_TEXT_CHARS) text.substring(0, MAX_TEXT_CHARS) else text
+        persist(
+            title = displayName.substringBeforeLast('.'),
+            type = SourceType.PDF,
+            originUri = uri.toString(),
+            text = capped,
+            chapters = emptyList(),
+        )
+    }
+
     suspend fun importFromFile(uri: Uri, displayName: String): Source = withContext(Dispatchers.IO) {
         val parser = ParserRegistry.forUri(context, uri, displayName)
             ?: throw IllegalArgumentException("Unsupported file type: $displayName (only PDF, EPUB, and MOBI are supported)")
@@ -226,6 +255,8 @@ class LibraryRepository(
             parser.parse(context, uri, displayName)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // never swallow coroutine cancellation
+        } catch (e: com.flashcardreader.app.data.parser.ScannedPdfException) {
+            throw e // the caller can offer to read this one with OCR instead
         } catch (e: OutOfMemoryError) {
             throw IllegalStateException("That file is too large or complex to open on this device.")
         } catch (e: Exception) {

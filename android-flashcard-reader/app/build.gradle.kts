@@ -7,6 +7,19 @@ plugins {
     id("androidx.baselineprofile")
 }
 
+/**
+ * Screenshot rendering is opt-in, via -Psnapshots.
+ *
+ * Not because it is optional in spirit - it is the only way anyone writing this app can see the UI,
+ * since the Android SDK is unreachable from there - but because a Gradle plugin that turns out to
+ * be incompatible fails at *configuration* time and takes the APK build down with it. Kept out of
+ * the normal build, it can only ever break the job that asked for it.
+ */
+val snapshotsEnabled = providers.gradleProperty("snapshots").isPresent
+if (snapshotsEnabled) {
+    apply(plugin = "app.cash.paparazzi")
+}
+
 // Optional release-signing config. Values come from a gitignored keystore.properties at the
 // project root, or from RELEASE_* environment variables (e.g. CI secrets). Nothing secret is
 // committed: when neither is present, a `release` build is simply left unsigned - the debug
@@ -29,6 +42,12 @@ android {
         targetSdk = 34
         versionCode = 3
         versionName = "0.1.2"
+
+        // The OCR engine ships native code for four architectures. Real phones are ARM, and
+        // dropping the two x86 variants keeps most of that weight out of the APK.
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     // A single, committed signing key so every build - CI or local - signs with the
@@ -75,6 +94,12 @@ android {
                 signingConfigs.getByName("stable")
             }
         }
+    }
+
+    // The snapshot tests import Paparazzi, so their source is only on the compile path when the
+    // plugin that provides it is.
+    if (snapshotsEnabled) {
+        sourceSets.getByName("test").java.srcDir("src/snapshotTest/java")
     }
 
     buildFeatures {
@@ -130,6 +155,10 @@ dependencies {
 
     // PDF text extraction (fixed-layout PDF -> reflowable text).
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
+    // Optical character recognition, so a scanned PDF stops being a dead end. Pages are rasterised
+    // with the platform's own PdfRenderer, so this is the recogniser only - no second PDF engine.
+    implementation("com.rmtheis:tess-two:9.1.0")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
