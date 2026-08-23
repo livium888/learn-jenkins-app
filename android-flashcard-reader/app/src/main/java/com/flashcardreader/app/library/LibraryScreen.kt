@@ -177,9 +177,7 @@ fun LibraryScreen(
                 append(" of images. It can still be read by recognising the text on each page, ")
                 append("which takes a few seconds per page and gets the occasional word wrong.")
                 if (!offer.dataReady) {
-                    append("
-
-This is the first time, so about ")
+                    append("\n\nThis is the first time, so about ")
                     append(com.flashcardreader.app.data.parser.PdfOcr.APPROX_DOWNLOAD_MB)
                     append(" MB of recognition data will be downloaded first. It is kept for next time.")
                 }
