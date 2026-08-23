@@ -193,6 +193,7 @@ class ReaderViewModel(
             val startIndex = source?.let { src ->
                 chunks.indexOfFirst { it.endChar > src.lastPositionChar }.let { if (it < 0) 0 else it }
             } ?: 0
+            val startOffset = chunks.getOrNull(startIndex)?.startChar ?: 0
             _uiState.update {
                 it.copy(
                     source = source, fullText = text, terms = terms, chunks = chunks,
@@ -639,12 +640,7 @@ class ReaderViewModel(
         return text.substring(offset, end).replace(Regex("\\s+"), " ").trim().ifEmpty { "Bookmark" }
     }
 
-    /** Banks credit for a cloze card whose typed answer was actually correct (capped per day). */
-    fun earnFromCard(term: Term) {
-        viewModelScope.launch { creditBank.earnFromCard(term.id) }
-    }
-
-    fun answerFlashcard(rating: Rating, confidence: Confidence) {
+        fun answerFlashcard(rating: Rating, confidence: Confidence) {
         onReadingInteraction()
         val match = _uiState.value.pendingFlashcards.firstOrNull() ?: return
         viewModelScope.launch {

@@ -65,7 +65,7 @@ fun AppNavGraph(app: FlashcardReaderApp) {
         }
         composable(ROUTE_REVIEW) {
             val viewModel: ReviewViewModel = viewModel(
-                factory = viewModelFactory { initializer { ReviewViewModel(app.termRepository, app.libraryRepository, app.readingCheckRepository, app.focusPrefs, app.creditBank, app.questionFeedback) } },
+                factory = viewModelFactory { initializer { ReviewViewModel(app.termRepository, app.libraryRepository, app.readingCheckRepository, app.questionFeedback) } },
             )
             ReviewScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }

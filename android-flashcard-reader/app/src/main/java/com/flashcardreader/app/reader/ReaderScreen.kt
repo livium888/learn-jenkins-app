@@ -361,8 +361,6 @@ fun ReaderScreen(
         FlashcardDialog(
             term = match.term,
             contextSentence = match.contextSentence,
-            earnMode = viewModel.focusEnabled,
-            onEarned = viewModel::earnFromCard,
             onAnswered = viewModel::answerFlashcard,
         )
     }

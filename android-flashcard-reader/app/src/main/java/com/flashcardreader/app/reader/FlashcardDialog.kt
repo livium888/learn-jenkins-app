@@ -14,7 +14,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,18 +60,9 @@ fun FlashcardDialog(
     sourceLabel: String = "",
     remaining: Int? = null,
     onExit: (() -> Unit)? = null,
-    /**
-     * When true, a correctly *typed* cloze answer earns Focus Gate credit. The self-rating never
-     * earns anything - that is the whole point, since tapping "Good" four times in a second is
-     * exactly the cheat this closes.
-     */
-    earnMode: Boolean = false,
-    onEarned: (Term) -> Unit = {},
     onAnswered: (Rating, Confidence) -> Unit,
 ) {
     var revealed by remember(term.id) { mutableStateOf(false) }
-    var typed by remember(term.id) { mutableStateOf("") }
-    var wasCorrect by remember(term.id) { mutableStateOf<Boolean?>(null) }
     var confidence by remember(term.id) { mutableStateOf(Confidence.UNSURE) }
 
     val context = LocalContext.current
@@ -132,59 +122,21 @@ fun FlashcardDialog(
         }
 
         if (!revealed) {
-            // A card can only earn when there is something objective to check against: a cloze has
-            // exactly one right answer, a free-form definition does not.
-            val earning = earnMode && isCloze
+            // No text field. Nobody was typing into it: without Focus Gate on it was never graded,
+            // so it collected an answer and then asked you to mark your own work. Recall it in your
+            // head, say how sure you are, and reveal.
             Text(
-                when {
-                    earning -> "Type the missing word to earn reading time."
-                    isCloze -> "Say the missing word, then reveal."
-                    else -> "Try to recall it before revealing."
-                },
+                if (isCloze) "Recall the missing word, then reveal." else "Try to recall it before revealing.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedTextField(
-                value = typed,
-                onValueChange = { typed = it },
-                label = { Text(if (earning) "Your answer" else "Your answer (optional)") },
-                singleLine = isCloze,
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth(),
             )
 
             Text("How sure are you?", style = MaterialTheme.typography.labelLarge)
             ConfidenceSegmented(selected = confidence, onSelect = { confidence = it })
 
-            PrimaryButton(
-                text = if (earning) "Check answer" else "Reveal answer",
-                enabled = !earning || typed.isNotBlank(),
-                onClick = {
-                    if (earning) {
-                        val correct = AnswerMatcher.isCorrect(typed, term.displayText)
-                        wasCorrect = correct
-                        if (correct) onEarned(term)
-                    }
-                    revealed = true
-                },
-            )
+            PrimaryButton(text = "Reveal answer", onClick = { revealed = true })
         } else {
             // --- Revealed answer ---
-            if (typed.isNotBlank()) {
-                Text(
-                    "You wrote: $typed",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            wasCorrect?.let { correct ->
-                Text(
-                    if (correct) "Correct - time banked." else "Not quite - no time banked this once.",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (correct) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             if (isCloze) {
                 Text(
@@ -216,7 +168,10 @@ fun FlashcardDialog(
                     onCheck = {
                         aiLoading = true
                         scope.launch {
-                            val r = GeminiTutor.evaluateGuess(context, term.displayText, contextSentence, typed)
+                            // No guess to evaluate any more - there is nothing to type into. The
+                            // tutor now just explains the word as it is used in this sentence,
+                            // which is the half of its answer that was always the useful half.
+                            val r = GeminiTutor.evaluateGuess(context, term.displayText, contextSentence, "")
                             aiResult = r.getOrElse { "Couldn't reach the AI: ${it.message}" }
                             aiLoading = false
                         }
@@ -343,7 +298,7 @@ private fun AiTutorBlock(result: String?, loading: Boolean, onCheck: () -> Unit)
             CircularProgressIndicator(modifier = Modifier.padding(2.dp))
             Text("Asking the tutor…", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        else -> TonalButton(text = "Check my guess with AI", onClick = onCheck)
+        else -> TonalButton(text = "Explain this with AI", onClick = onCheck)
     }
 }
 

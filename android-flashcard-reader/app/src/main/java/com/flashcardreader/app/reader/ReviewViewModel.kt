@@ -11,8 +11,6 @@ import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Rating
 import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.repository.ReadingCheckRepository
-import com.flashcardreader.app.focus.CreditBank
-import com.flashcardreader.app.focus.FocusPrefs
 import com.flashcardreader.app.data.repository.TermRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,18 +38,8 @@ class ReviewViewModel(
     private val termRepository: TermRepository,
     private val libraryRepository: LibraryRepository,
     private val readingCheckRepository: ReadingCheckRepository,
-    private val focusPrefs: FocusPrefs,
-    private val creditBank: CreditBank,
     private val feedback: QuestionFeedback? = null,
 ) : ViewModel() {
-
-    /** Whether Focus Gate is on, so cards can offer to earn time. */
-    val focusEnabled: Boolean get() = focusPrefs.enabled
-
-    /** Banks credit for a cloze card whose typed answer was actually correct (capped per day). */
-    fun earnFromCard(term: Term) {
-        viewModelScope.launch { creditBank.earnFromCard(term.id) }
-    }
 
     private val _uiState = MutableStateFlow(ReviewUiState())
     val uiState: StateFlow<ReviewUiState> = _uiState

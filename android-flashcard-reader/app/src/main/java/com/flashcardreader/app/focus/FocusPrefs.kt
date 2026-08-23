@@ -28,15 +28,7 @@ class FocusPrefs(context: Context) {
         get() = prefs.getFloat(KEY_RATE, 2f)
         set(value) = prefs.edit().putFloat(KEY_RATE, value).apply()
 
-    /** Credit granted for one correctly-typed cloze answer, in seconds. */
-    var secondsPerCard: Int
-        get() = prefs.getInt(KEY_CARD_SECONDS, 60)
-        set(value) = prefs.edit().putInt(KEY_CARD_SECONDS, value).apply()
 
-    /** Ceiling on how much credit cards can contribute per day, in minutes ("capped" bonus). */
-    var dailyCardCapMinutes: Int
-        get() = prefs.getInt(KEY_CARD_CAP, 15)
-        set(value) = prefs.edit().putInt(KEY_CARD_CAP, value).apply()
 
     /** Ceiling on total credit earnable per day, in minutes. */
     var dailyTotalCapMinutes: Int
@@ -61,8 +53,6 @@ class FocusPrefs(context: Context) {
         private const val KEY_ENABLED = "enabled"
         private const val KEY_BLOCKED = "blocked_packages"
         private const val KEY_RATE = "minutes_per_reading_minute"
-        private const val KEY_CARD_SECONDS = "seconds_per_card"
-        private const val KEY_CARD_CAP = "daily_card_cap"
         private const val KEY_TOTAL_CAP = "daily_total_cap"
         private const val KEY_MAX_WPM = "max_wpm"
         private const val KEY_IDLE = "idle_timeout"

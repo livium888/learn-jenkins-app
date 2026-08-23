@@ -11,9 +11,8 @@ import java.time.LocalDate
 /**
  * The credit balance: reading earns seconds of access to gated apps, opening those apps spends them.
  *
- * Daily counters roll over at midnight. Two ceilings apply: cards can only contribute
- * [FocusPrefs.dailyCardCapMinutes] per day (so they stay a bonus rather than something to farm), and
- * everything together is capped by [FocusPrefs.dailyTotalCapMinutes].
+ * Reading is the only thing that earns. Daily counters roll over at midnight, and the day's total
+ * is capped by [FocusPrefs.dailyTotalCapMinutes].
  *
  * Reads and writes come from both the UI and the monitor service, so mutations are synchronized.
  */
@@ -45,28 +44,11 @@ class CreditBank(context: Context) {
         return grant(requested)
     }
 
-    /**
-     * Credits one correctly-answered cloze card. Returns seconds added (0 if this term already
-     * earned today, or a ceiling is reached).
-     */
-    @Synchronized
-    fun earnFromCard(termId: Long): Long {
-        rollDayIfNeeded()
-        val already = prefs.getStringSet(KEY_TERMS_TODAY, emptySet()).orEmpty()
-        if (already.contains(termId.toString())) return 0
-        val cardCapSeconds = settings.dailyCardCapMinutes * 60L
-        val cardEarned = prefs.getLong(KEY_CARD_EARNED_TODAY, 0L)
-        val room = cardCapSeconds - cardEarned
-        if (room <= 0) return 0
-        val granted = grant(minOf(settings.secondsPerCard.toLong(), room))
-        if (granted > 0) {
-            prefs.edit()
-                .putStringSet(KEY_TERMS_TODAY, already + termId.toString())
-                .putLong(KEY_CARD_EARNED_TODAY, cardEarned + granted)
-                .apply()
-        }
-        return granted
-    }
+    // There used to be a second earn path here: a correctly *typed* cloze answer banked time.
+    // It only worked because typing cannot be guessed. Answers are multiple choice now, and a
+    // four-option tap is right a quarter of the time by chance - so the same reward would have
+    // made credit farmable by tapping. Reading is the only thing that earns, which is what the
+    // gate was for in the first place.
 
     /** Spends up to [seconds] of balance while a gated app is open. Returns the remaining balance. */
     @Synchronized
@@ -104,7 +86,9 @@ class CreditBank(context: Context) {
             prefs.edit()
                 .putLong(KEY_DAY, today)
                 .putLong(KEY_EARNED_TODAY, 0L)
-                .putLong(KEY_CARD_EARNED_TODAY, 0L)
+                // Cleared rather than left behind: these belonged to the card earn path, which
+                // is gone, and a stale key is a question someone has to answer later.
+                .remove(KEY_CARD_EARNED_TODAY)
                 .remove(KEY_TERMS_TODAY)
                 .apply()
         }
