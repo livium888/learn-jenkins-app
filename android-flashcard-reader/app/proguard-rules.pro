@@ -24,3 +24,10 @@
 
 # --- Our Room entities --- defensive keep so column/field mapping is never surprised by R8.
 -keep class com.flashcardreader.app.data.db.entities.** { *; }
+
+# --- Readable crash reports ---
+# R8 still shrinks and optimizes; it just stops renaming. Without this, the trace the app shows
+# after a crash is a wall of a.b.c() and names nothing you could act on - which defeats the point
+# of showing it at all. The cost is a modest amount of APK size in retained names.
+-dontobfuscate
+-keepattributes SourceFile,LineNumberTable

@@ -1,6 +1,7 @@
 package com.flashcardreader.app.data.db.entities
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /** Which kind of card a review belonged to, so the two can be fitted together or apart. */
@@ -18,7 +19,13 @@ enum class CardKind { TERM, READING_CHECK }
  * megabytes, and having the raw history means a better fitting method later can be applied to
  * reviews already done rather than starting the clock again.
  */
-@Entity(tableName = "review_logs")
+// The index has to be declared here as well as created in the migration. Room compares the two
+// after every upgrade and refuses to open a database whose indices it did not expect - which is
+// how this crashed on launch for anyone upgrading, while a clean install was fine.
+@Entity(
+    tableName = "review_logs",
+    indices = [Index(name = "index_review_logs_card", value = ["cardId", "cardKind"])],
+)
 data class ReviewLog(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val cardId: Long,

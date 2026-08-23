@@ -40,14 +40,8 @@ android {
         applicationId = "com.flashcardreader.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.1.2"
-
-        // The OCR engine ships native code for four architectures. Real phones are ARM, and
-        // dropping the two x86 variants keeps most of that weight out of the APK.
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
-        }
+        versionCode = 4
+        versionName = "0.1.3"
     }
 
     // A single, committed signing key so every build - CI or local - signs with the
@@ -104,6 +98,9 @@ android {
 
     buildFeatures {
         compose = true
+        // Off by default since AGP 8. Needed so the crash reporter can name the exact build a
+        // trace came from - a stack trace without a version is only half a report.
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
@@ -155,10 +152,6 @@ dependencies {
 
     // PDF text extraction (fixed-layout PDF -> reflowable text).
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-
-    // Optical character recognition, so a scanned PDF stops being a dead end. Pages are rasterised
-    // with the platform's own PdfRenderer, so this is the recogniser only - no second PDF engine.
-    implementation("com.rmtheis:tess-two:9.1.0")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 

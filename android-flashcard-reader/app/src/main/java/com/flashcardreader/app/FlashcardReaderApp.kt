@@ -3,6 +3,7 @@ package com.flashcardreader.app
 import android.app.Application
 import com.flashcardreader.app.data.db.AppDatabase
 import com.flashcardreader.app.data.repository.CalibrationStore
+import com.flashcardreader.app.diagnostics.CrashLog
 import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.fsrs.Fsrs
 import com.flashcardreader.app.data.repository.ReadingCheckRepository
@@ -15,6 +16,17 @@ import com.flashcardreader.app.theme.ReaderPrefs
 
 /** Simple manual DI container - the app is small enough not to need Hilt/Dagger yet. */
 class FlashcardReaderApp : Application() {
+
+    /** Records the last crash to a file so it can be read off the phone rather than guessed at. */
+    val crashLog by lazy { CrashLog(this) }
+
+    override fun onCreate() {
+        super.onCreate()
+        // Installed first, before anything else can throw - a handler registered after the failing
+        // code would miss exactly the crashes worth catching.
+        crashLog.install(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+    }
+
     val database by lazy { AppDatabase.get(this) }
     val calibration by lazy { CalibrationStore(this) }
     val reviewHistory by lazy { ReviewHistory(this, database.reviewLogDao()) }
