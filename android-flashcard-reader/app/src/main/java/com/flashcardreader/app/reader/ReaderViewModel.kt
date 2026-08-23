@@ -494,8 +494,24 @@ class ReaderViewModel(
         appendLine("  pages read this stretch: ${chunksSinceCheck.size}")
         appendLine("  questions ready: ${_uiState.value.pendingChecks.size}")
         appendLine("  question due: ${_uiState.value.checkDue}")
+        appendLine("  accrual idle (no recent touch): ${_uiState.value.creditIdle}")
+        // The report showed a frozen word count and gave no hint why, which is how the deadlock
+        // between "a question is ready" and "reading is being counted" went unnoticed. If the
+        // count ever stops climbing again, this line should say what is holding it.
+        appendLine("  counting reading: ${whyNotCounting() ?: "yes"}")
         val status = _uiState.value.checkStatus
         if (status.isNotBlank()) appendLine("  last problem: $status")
+    }
+
+    /** Why reading is not being counted right now, or null when it is. */
+    private fun whyNotCounting(): String? {
+        val state = _uiState.value
+        return when {
+            state.creditIdle -> "no - nobody has touched the screen recently"
+            state.pendingFlashcards.isNotEmpty() -> "no - a flashcard is covering the text"
+            state.pendingChecks.isNotEmpty() && state.checkDue -> "no - a question is on screen"
+            else -> null
+        }
     }
 
     /**

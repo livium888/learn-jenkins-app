@@ -272,12 +272,17 @@ fun ReaderScreen(
                         val live = viewModel.uiState.value
                         // A Compose dialog keeps the reader RESUMED, so a prompt covering the text
                         // must explicitly stop accrual - as must split-screen beside the blocked app.
-                        val covered = live.pendingFlashcards.isNotEmpty() ||
-                            live.pendingComprehension ||
-                            live.pendingChecks.isNotEmpty() ||
-                            activity?.isInMultiWindowMode == true
+                        // Worked out by the same function that decides what to draw, so a question
+                        // that is merely prepared can never stop the reading that makes it due.
+                        val overlays = readerOverlays(
+                            pendingFlashcards = live.pendingFlashcards.size,
+                            pendingChecks = live.pendingChecks.size,
+                            checkDue = live.checkDue,
+                            pendingComprehension = live.pendingComprehension,
+                            inMultiWindow = activity?.isInMultiWindowMode == true,
+                        )
                         viewModel.onReadingTick(
-                            focusedChunk = if (covered) -1 else centreChunkIndex(listState),
+                            focusedChunk = if (overlays.coversText) -1 else centreChunkIndex(listState),
                             elapsedMs = delta,
                         )
                     }
@@ -345,7 +350,16 @@ fun ReaderScreen(
         }
     }
 
-    state.pendingFlashcards.firstOrNull()?.let { match ->
+    val overlays = readerOverlays(
+        pendingFlashcards = state.pendingFlashcards.size,
+        pendingChecks = state.pendingChecks.size,
+        checkDue = state.checkDue,
+        pendingComprehension = state.pendingComprehension,
+        // Only about what is drawn here; split-screen changes nothing on screen.
+        inMultiWindow = false,
+    )
+
+    state.pendingFlashcards.firstOrNull()?.takeIf { overlays.showFlashcard }?.let { match ->
         FlashcardDialog(
             term = match.term,
             contextSentence = match.contextSentence,
@@ -358,7 +372,7 @@ fun ReaderScreen(
     // An AI question about the passage just read takes precedence over the generic recall prompt:
     // it asks about the actual text, so the generic one would only be a weaker duplicate.
     val readingCheck = state.pendingChecks.getOrNull(state.checkIndex)
-    if (readingCheck != null && state.checkDue && state.pendingFlashcards.isEmpty()) {
+    if (readingCheck != null && overlays.showReadingCheck) {
         ReadingCheckDialog(
             check = readingCheck,
             onAnswered = viewModel::onReadingCheckAnswered,
@@ -368,7 +382,7 @@ fun ReaderScreen(
             position = if (state.pendingChecks.size > 1) state.checkIndex + 1 else null,
             total = state.pendingChecks.size,
         )
-    } else if (state.pendingComprehension && state.pendingFlashcards.isEmpty()) {
+    } else if (overlays.showComprehension) {
         ComprehensionDialog(onDone = viewModel::dismissComprehension)
     }
 
