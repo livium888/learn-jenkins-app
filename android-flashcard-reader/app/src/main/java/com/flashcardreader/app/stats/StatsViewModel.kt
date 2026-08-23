@@ -7,6 +7,7 @@ import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.repository.CalibrationLevel
 import com.flashcardreader.app.data.repository.CalibrationStore
 import com.flashcardreader.app.data.repository.ReadingCheckCounts
+import com.flashcardreader.app.data.repository.ReviewHistory
 import com.flashcardreader.app.data.repository.ReadingCheckRepository
 import com.flashcardreader.app.data.repository.TermRepository
 import kotlinx.coroutines.flow.SharingStarted
@@ -40,12 +41,15 @@ data class Stats(
     val readingChecksDue: Int = 0,
     val readingChecksAnswered: Int = 0,
     val readingChecksRemembered: Int = 0,
+    /** How many reviews the scheduler's fitted weights were built from; 0 = FSRS defaults. */
+    val scheduleFittedFrom: Int = 0,
 )
 
 class StatsViewModel(
     private val termRepository: TermRepository,
     private val calibration: CalibrationStore,
     private val readingChecks: ReadingCheckRepository,
+    private val reviewHistory: ReviewHistory,
 ) : ViewModel() {
     // Combined so the comprehension questions refresh with everything else - a count that only
     // updated when a *word* changed would go stale exactly when someone came to check it.
@@ -63,6 +67,7 @@ class StatsViewModel(
                 readingChecksDue = counts.due,
                 readingChecksAnswered = counts.answered,
                 readingChecksRemembered = counts.remembered,
+                scheduleFittedFrom = reviewHistory.fittedFromReviews,
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Stats())

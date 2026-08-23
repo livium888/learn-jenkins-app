@@ -29,7 +29,16 @@ enum class Confidence { GUESSING, UNSURE, CONFIDENT }
  * enough data (a few hundred reviews) - that optimizer is not implemented here
  * yet and is a good follow-up once real usage data exists.
  */
-class Fsrs(private val requestRetention: Double = 0.9) {
+class Fsrs(
+    private val requestRetention: Double = 0.9,
+    /**
+     * Initial stability per rating, fitted to this person's own review history.
+     *
+     * Empty means "use the published defaults", which is the right cold start and stays the right
+     * answer until there is enough history to beat it - see FsrsOptimizer.
+     */
+    private val fittedInitialStability: Map<Rating, Double> = emptyMap(),
+) {
 
     companion object {
         // Power-law forgetting curve constants (fit so that R(t=S) == 0.9).
@@ -54,7 +63,8 @@ class Fsrs(private val requestRetention: Double = 0.9) {
     private fun nextIntervalDays(stability: Double): Double =
         (stability / FACTOR) * (requestRetention.pow(1.0 / DECAY) - 1.0)
 
-    private fun initStability(rating: Rating): Double = W[rating.value - 1].coerceAtLeast(0.1)
+    private fun initStability(rating: Rating): Double =
+        (fittedInitialStability[rating] ?: W[rating.value - 1]).coerceAtLeast(0.1)
 
     private fun initDifficulty(rating: Rating): Double =
         (W[4] - (rating.value - 3) * W[5]).coerceIn(1.0, 10.0)

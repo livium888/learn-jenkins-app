@@ -143,6 +143,16 @@ class ReaderViewModel(
     /** Row id of the question currently on offer, so answering it doesn't have to search for it. */
     private var pendingCheckId: Long? = null
 
+    /**
+     * Questions from earlier in *this* book that have come due again.
+     *
+     * Vocabulary re-fires the moment its word reappears in the text, but comprehension questions
+     * used to wait in the review screen and never surface while reading - so a question about
+     * chapter two was never asked again during chapter nine, which is exactly where it belongs.
+     * Loaded once on open, and offered between newly written ones.
+     */
+    private var dueFromThisBook: MutableList<com.flashcardreader.app.data.db.entities.ReadingCheckCard> = mutableListOf()
+
     /** Words of genuine reading between checks, from the user's chosen interval. */
     private val checkThresholdWords: Int
         get() = aiPrefs.readingCheckMinutes * ReadingCreditTracker.TYPICAL_WPM
@@ -160,6 +170,14 @@ class ReaderViewModel(
             val bookmarks = source?.let { libraryRepository.readBookmarks(it) } ?: emptyList()
             // Pages already paid for in a previous session must never earn again.
             source?.let { creditTracker.restore(libraryRepository.readCreditedChunks(it)) }
+            // Questions this book has already produced, which are due to be asked again.
+            dueFromThisBook = runCatching {
+                val now = System.currentTimeMillis()
+                readingCheckRepository.forSource(sourceId)
+                    .filter { it.due == null || it.due <= now }
+                    .filter { it.reps > 0 }
+                    .toMutableList()
+            }.getOrDefault(mutableListOf())
             // Chunking walks the whole book string; keep it off the main thread so a large
             // book doesn't hitch on open.
             val chunks = withContext(Dispatchers.Default) { chunkText(text, chapters) }
@@ -366,6 +384,32 @@ class ReaderViewModel(
     private fun maybePrepareReadingCheck() {
         if (generatedForWindow || checkJob?.isActive == true) return
         if (!aiPrefs.readingChecks) return
+        if (sourceId in aiPrefs.excludedSources) {
+            setCheckStatus("Reading checks are switched off for this book.")
+            return
+        }
+        if (wordsSinceCheck < checkThresholdWords * PREPARE_FRACTION) return
+
+        // A question already written for this book and now due again is free - no API call, no
+        // wait, and it is the one thing that actually tests whether chapter two stuck. Checked
+        // before the key is, because re-asking an existing question needs no key at all.
+        dueFromThisBook.removeFirstOrNull()?.let { revisit ->
+            generatedForWindow = true
+            pendingCheckId = revisit.id
+            _uiState.update {
+                it.copy(
+                    pendingCheck = ReadingCheck(
+                        question = revisit.question,
+                        correctAnswer = revisit.correctAnswer,
+                        distractors = revisit.wrongOptions,
+                        evidence = revisit.evidence,
+                    ),
+                    checkStatus = "",
+                )
+            }
+            return
+        }
+
         // Say why nothing is happening. A feature that stays silent when misconfigured is
         // indistinguishable from one that is broken, and there is no way for anyone to tell which.
         if (!aiPrefs.isReady) {
@@ -378,12 +422,6 @@ class ReaderViewModel(
             )
             return
         }
-        if (sourceId in aiPrefs.excludedSources) {
-            setCheckStatus("Reading checks are switched off for this book.")
-            return
-        }
-        if (wordsSinceCheck < checkThresholdWords * PREPARE_FRACTION) return
-
         generatedForWindow = true
         val passage = passageSinceLastCheck()
         val offset = _uiState.value.chunks.getOrNull(chunksSinceCheck.firstOrNull() ?: 0)?.startChar ?: 0

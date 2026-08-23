@@ -138,6 +138,21 @@ fun StatsScreen(
                 SectionTitle("Retrieval")
                 StatRow("Total reviews", stats.totalReviews.toString())
                 StatRow("Retention (approx.)", stats.retentionPct?.let { "$it%" } ?: "—")
+                StatRow(
+                    "Schedule fitted to you",
+                    if (stats.scheduleFittedFrom > 0) "from ${stats.scheduleFittedFrom} reviews" else "not yet",
+                )
+                Text(
+                    if (stats.scheduleFittedFrom > 0) {
+                        "Your intervals are now set from your own review history rather than from " +
+                            "FSRS's published averages, and are refitted as more history builds up."
+                    } else {
+                        "Intervals currently use FSRS's published defaults. Once you have answered " +
+                            "enough cards, they are refitted to how you actually forget."
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text(
                     "A rough proxy (1 − lapses ÷ reviews). It sharpens as you review more.",
                     style = MaterialTheme.typography.labelMedium,

@@ -21,6 +21,7 @@ data class ReadingCheckCounts(val due: Int = 0, val answered: Int = 0, val remem
 class ReadingCheckRepository(
     private val dao: ReadingCheckDao,
     private val fsrs: Fsrs = Fsrs(),
+    private val history: ReviewHistory? = null,
 ) {
 
     /** Saves a freshly generated question against the passage it came from. */
@@ -67,6 +68,15 @@ class ReadingCheckRepository(
         now: Long = System.currentTimeMillis(),
     ) {
         val rating = if (correct) Rating.GOOD else Rating.AGAIN
+        history?.record(
+            cardId = card.id,
+            kind = com.flashcardreader.app.data.db.entities.CardKind.READING_CHECK,
+            rating = rating,
+            stabilityBefore = card.stability,
+            difficultyBefore = card.difficulty,
+            lastReviewedAt = card.lastReviewedAt,
+            now = now,
+        )
         val next = fsrs.review(
             FsrsState(
                 difficulty = card.difficulty,
@@ -92,5 +102,6 @@ class ReadingCheckRepository(
                 hyperMiss = card.hyperMiss || (!correct && wasConfident),
             ),
         )
+        history?.refitIfDue()
     }
 }

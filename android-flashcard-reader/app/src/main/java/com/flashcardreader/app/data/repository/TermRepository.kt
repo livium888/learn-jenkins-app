@@ -18,6 +18,8 @@ class TermRepository(
     private val occurrenceDao: OccurrenceDao,
     private val calibration: CalibrationStore,
     private val fsrs: Fsrs = Fsrs(),
+    /** Optional so tests and tools can build a repository without a database of past reviews. */
+    private val history: ReviewHistory? = null,
 ) {
     fun observeAll(): Flow<List<Term>> = termDao.observeAll()
 
@@ -86,7 +88,18 @@ class TermRepository(
      * clears it; anything else leaves it unchanged.
      */
     suspend fun submitReview(term: Term, rating: Rating, confidence: Confidence): Term {
-        val scheduled = fsrs.review(term, rating, System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        // Logged before rescheduling, because the fit needs the state the answer was given from.
+        history?.record(
+            cardId = term.id,
+            kind = com.flashcardreader.app.data.db.entities.CardKind.TERM,
+            rating = rating,
+            stabilityBefore = term.stability,
+            difficultyBefore = term.difficulty,
+            lastReviewedAt = term.lastReviewedAt,
+            now = now,
+        )
+        val scheduled = fsrs.review(term, rating, now)
         val hyperMiss = when {
             confidence == Confidence.CONFIDENT && rating == Rating.AGAIN -> true
             rating == Rating.GOOD || rating == Rating.EASY -> false
@@ -95,6 +108,7 @@ class TermRepository(
         val updated = scheduled.copy(hyperMiss = hyperMiss)
         termDao.update(updated)
         calibration.record(confidence, knew = rating == Rating.GOOD || rating == Rating.EASY)
+        history?.refitIfDue()
         return updated
     }
 

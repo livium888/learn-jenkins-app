@@ -10,11 +10,14 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.flashcardreader.app.data.db.dao.OccurrenceDao
 import com.flashcardreader.app.data.db.dao.ReadingCheckDao
+import com.flashcardreader.app.data.db.dao.ReviewLogDao
 import com.flashcardreader.app.data.db.dao.SourceDao
 import com.flashcardreader.app.data.db.dao.TermDao
 import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.Occurrence
+import com.flashcardreader.app.data.db.entities.CardKind
 import com.flashcardreader.app.data.db.entities.ReadingCheckCard
+import com.flashcardreader.app.data.db.entities.ReviewLog
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.SourceType
 import com.flashcardreader.app.data.db.entities.Term
@@ -31,11 +34,23 @@ class Converters {
 
     @TypeConverter
     fun stringToSourceType(value: String): SourceType = SourceType.valueOf(value)
+
+    @TypeConverter
+    fun cardKindToString(value: CardKind): String = value.name
+
+    @TypeConverter
+    fun stringToCardKind(value: String): CardKind = CardKind.valueOf(value)
 }
 
 @Database(
-    entities = [Term::class, Source::class, Occurrence::class, ReadingCheckCard::class],
-    version = 4,
+    entities = [
+        Term::class,
+        Source::class,
+        Occurrence::class,
+        ReadingCheckCard::class,
+        ReviewLog::class,
+    ],
+    version = 5,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -44,6 +59,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sourceDao(): SourceDao
     abstract fun occurrenceDao(): OccurrenceDao
     abstract fun readingCheckDao(): ReadingCheckDao
+    abstract fun reviewLogDao(): ReviewLogDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -95,13 +111,43 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v5 starts keeping a review history, so the scheduler can eventually be fitted to how this
+         * particular person forgets rather than to FSRS's published averages. Another CREATE TABLE:
+         * nothing existing is touched, and no saved card can be disturbed by the upgrade.
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS review_logs (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        cardId INTEGER NOT NULL,
+                        cardKind TEXT NOT NULL,
+                        rating INTEGER NOT NULL,
+                        elapsedDays REAL NOT NULL,
+                        stabilityBefore REAL NOT NULL,
+                        difficultyBefore REAL NOT NULL,
+                        wasFirstReview INTEGER NOT NULL,
+                        reviewedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                // Every read of this table is "all reviews for one card", so it is worth an index
+                // from the start rather than after it gets slow.
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_review_logs_card ON review_logs (cardId, cardKind)",
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "flashcard-reader.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { instance = it }
             }
     }
 }
