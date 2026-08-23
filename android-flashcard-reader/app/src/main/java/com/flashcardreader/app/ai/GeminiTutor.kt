@@ -45,10 +45,10 @@ object GeminiTutor {
      * feature is off by default and has its own switch: unlike the word tutor, which sends a single
      * word and sentence on an explicit tap, this uploads pages of a book automatically.
      */
-    suspend fun generateReadingChecks(
+    suspend fun generatePassageStudy(
         context: Context,
         passage: String,
-    ): Result<List<ReadingCheck>> = withContext(Dispatchers.IO) {
+    ): Result<PassageStudy> = withContext(Dispatchers.IO) {
         val prefs = AiPrefs(context)
         val key = prefs.apiKey
         if (key.isBlank()) {
@@ -81,17 +81,35 @@ object GeminiTutor {
             appendLine("- Quote the sentence(s) the answer comes from, copied EXACTLY from the passage, character for character.")
             appendLine("- Write in ${prefs.myLanguage}.")
             appendLine()
+            appendLine()
+            appendLine("Then pick at most $VOCAB_CEILING words or short phrases from the passage that a")
+            appendLine("reader of this book would plausibly not know, and write a card for each.")
+            appendLine("Rules for the words:")
+            appendLine("- The word must appear in the passage, exactly as written there.")
+            appendLine("- Pick genuinely unfamiliar or technical words. Never everyday ones.")
+            appendLine("- If every word in the passage is ordinary, return an empty list. Never pad.")
+            appendLine("- Define it as it is used HERE, in one short line.")
+            appendLine("- Give exactly 3 wrong definitions. Each must be plausible for a word of this")
+            appendLine("  kind, so that only knowing the word tells them apart. Never absurd.")
+            appendLine()
             appendLine("Reply with JSON only, no other text, in exactly this shape:")
-            appendLine("""{"questions":[{"question":"...","answer":"...","distractors":["...","...","..."],"evidence":"..."}]}""")
+            appendLine("""{"questions":[{"question":"...","answer":"...","distractors":["...","...","..."],"evidence":"..."}],"words":[{"word":"...","definition":"...","distractors":["...","...","..."]}]}""")
             appendLine()
             appendLine("PASSAGE:")
             appendLine(trimmed)
         }
 
         askWithWorkingModel(prefs, key, prompt, READING_CHECK_SCHEMA).mapCatching { reply ->
-            ReadingCheck.parseAll(reply, trimmed, ceiling).ifEmpty {
+            val checks = ReadingCheck.parseAll(reply, trimmed, ceiling).ifEmpty {
                 error("The AI answered, but none of its questions checked out (bad JSON, wrong number of options, or evidence that isn't in the passage).")
             }
+            // Words are a bonus on the same reply, so a batch with no usable ones is not a failure -
+            // the questions still stand. Parsed from the same JSON the questions came out of.
+            val words = runCatching {
+                val json = ReadingCheck.extractJsonObject(reply) ?: return@runCatching emptyList()
+                VocabCards.parseAll(json, trimmed, VOCAB_CEILING)
+            }.getOrDefault(emptyList())
+            PassageStudy(checks, words)
         }
     }
 
@@ -276,15 +294,31 @@ object GeminiTutor {
                         .put("evidence", JSONObject().put("type", "STRING")),
                 )
                 .put("required", JSONArray().put("question").put("answer").put("distractors").put("evidence"))
+            val word = JSONObject()
+                .put("type", "OBJECT")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("word", JSONObject().put("type", "STRING"))
+                        .put("definition", JSONObject().put("type", "STRING"))
+                        .put(
+                            "distractors",
+                            JSONObject()
+                                .put("type", "ARRAY")
+                                .put("items", JSONObject().put("type", "STRING")),
+                        ),
+                )
+                .put("required", JSONArray().put("word").put("definition").put("distractors"))
             return JSONObject()
                 .put("type", "OBJECT")
                 .put(
                     "properties",
-                    JSONObject().put(
-                        "questions",
-                        JSONObject().put("type", "ARRAY").put("items", question),
-                    ),
+                    JSONObject()
+                        .put("questions", JSONObject().put("type", "ARRAY").put("items", question))
+                        .put("words", JSONObject().put("type", "ARRAY").put("items", word)),
                 )
+                // Only the questions are required: a passage of entirely ordinary words should
+                // come back with none rather than three invented ones.
                 .put("required", JSONArray().put("questions"))
         }
 

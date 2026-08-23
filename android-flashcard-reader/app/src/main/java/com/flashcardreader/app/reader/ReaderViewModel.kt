@@ -501,8 +501,8 @@ class ReaderViewModel(
         val passage = passageSinceLastCheck()
         val offset = _uiState.value.chunks.getOrNull(chunksSinceCheck.firstOrNull() ?: 0)?.startChar ?: 0
         checkJob = viewModelScope.launch {
-            val result = GeminiTutor.generateReadingChecks(context, passage)
-            val checks = result.getOrNull().orEmpty()
+            val result = GeminiTutor.generatePassageStudy(context, passage)
+            val checks = result.getOrNull()?.checks.orEmpty()
             if (checks.isEmpty()) {
                 // One failure used to disable checks for the whole session, because this flag was
                 // set on the way in and only ever cleared by answering a question that never came.
@@ -512,6 +512,19 @@ class ReaderViewModel(
                         (result.exceptionOrNull()?.message ?: "the AI didn't answer").take(160),
                 )
                 return@launch
+            }
+            // Words the model picked out of the same passage become cards without anyone being
+            // asked to write one. They arrive with their own wrong answers, so they are answerable
+            // by tapping from the moment they exist.
+            val words = result.getOrNull()?.words.orEmpty()
+            if (words.isNotEmpty()) {
+                runCatching { termRepository.saveAutoWords(words) }
+                    .onSuccess { added ->
+                        if (added > 0) {
+                            _uiState.update { it.copy(terms = termRepository.allTerms()) }
+                            setCheckStatus("Added $added new word${if (added == 1) "" else "s"} from what you read.")
+                        }
+                    }
             }
             // Saved before being asked, so every question is kept and scheduled even if this
             // batch is skipped - the point is that they come back, not that they are answered now.

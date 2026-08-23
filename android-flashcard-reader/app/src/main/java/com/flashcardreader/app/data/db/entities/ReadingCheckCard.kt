@@ -52,6 +52,9 @@ data class ReadingCheckCard(
         /** A unit separator: it cannot occur in prose, so no answer can ever split itself. */
         const val SEPARATOR = "\u001F"
 
+        /** One right answer and three wrong ones. */
+        const val REQUIRED_OPTIONS = 4
+
         fun joinDistractors(values: List<String>): String = values.joinToString(SEPARATOR)
     }
 }

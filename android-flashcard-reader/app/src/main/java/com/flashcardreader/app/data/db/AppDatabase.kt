@@ -60,7 +60,7 @@ class Converters {
         ReadingCheckCard::class,
         ReviewLog::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -168,13 +168,29 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v7 gives a word its wrong answers, so a card can be answered by tapping one of four
+         * definitions rather than revealed and self-graded.
+         *
+         * The default is written here and declared on the entity with `@ColumnInfo(defaultValue)`
+         * using the identical literal. Room compares them after every upgrade and refuses to open
+         * the database on any difference - which is how v5 crashed the app on launch. Cards that
+         * predate this have no wrong answers, and an empty column is exactly the signal the reader
+         * uses to fall back to the older flow.
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE terms ADD COLUMN distractors TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "flashcard-reader.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { instance = it }
             }
     }
 }

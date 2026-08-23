@@ -1,6 +1,9 @@
 package com.flashcardreader.app.reader
 
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -65,6 +68,16 @@ fun FlashcardDialog(
     var revealed by remember(term.id) { mutableStateOf(false) }
     var confidence by remember(term.id) { mutableStateOf(Confidence.UNSURE) }
 
+    // Cards that carry their own wrong answers are answered with one tap. Everything else - cards
+    // written by hand before this existed - keeps the older reveal-and-rate flow, so nothing in an
+    // existing deck stops working.
+    val multipleChoice = term.isMultipleChoice
+    val options = remember(term.id) { (term.wrongDefinitions + term.definition).shuffled() }
+    var chosen by remember(term.id) { mutableStateOf<String?>(null) }
+    // Started when the card appears; used to infer how sure the answer was, so the tap count
+    // stays at one. See AnswerTiming for why latency is a reasonable stand-in and what it misses.
+    val shownAt = remember(term.id) { SystemClock.elapsedRealtime() }
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val aiReady = remember { AiPrefs(context).isReady }
@@ -104,12 +117,12 @@ fun FlashcardDialog(
             }
         }
         Text(
-            text = if (isCloze) "What word is missing?" else "What does “${term.displayText}” mean?",
+            text = if (isCloze && !multipleChoice) "What word is missing?" else "What does “${term.displayText}” mean?",
             style = MaterialTheme.typography.titleLarge,
         )
 
         // --- The book sentence, set as a soft quote. ---
-        val sentence = if (isCloze) cloze else contextSentence.takeIf { it.isNotBlank() }
+        val sentence = if (isCloze && !multipleChoice) cloze else contextSentence.takeIf { it.isNotBlank() }
         if (sentence != null) {
             QuoteCard(sentence)
             if (sourceLabel.isNotBlank()) {
@@ -121,7 +134,21 @@ fun FlashcardDialog(
             }
         }
 
-        if (!revealed) {
+        if (multipleChoice) {
+            MultipleChoiceBody(
+                options = options,
+                correct = term.definition,
+                chosen = chosen,
+                onChoose = { chosen = it },
+                onContinue = {
+                    val right = chosen == term.definition
+                    onAnswered(
+                        if (right) Rating.GOOD else Rating.AGAIN,
+                        AnswerTiming.confidenceFor(SystemClock.elapsedRealtime() - shownAt),
+                    )
+                },
+            )
+        } else if (!revealed) {
             // No text field. Nobody was typing into it: without Focus Gate on it was never graded,
             // so it collected an answer and then asked you to mark your own work. Recall it in your
             // head, say how sure you are, and reveal.
@@ -312,4 +339,64 @@ private fun clozeSentence(sentence: String, word: String): String? {
     val regex = Regex("\\b" + Regex.escape(word) + "\\b", RegexOption.IGNORE_CASE)
     if (!regex.containsMatchIn(sentence)) return null
     return regex.replace(sentence, " _____ ").trim()
+}
+
+/**
+ * Four definitions, one tap, graded here on the device.
+ *
+ * The rating is derived from the answer rather than self-reported - right is GOOD, wrong is AGAIN -
+ * which is the same rule the comprehension questions already follow, and for the same reason: a tap
+ * on the correct option is evidence, whereas tapping "I knew that" is a claim.
+ */
+@Composable
+private fun ColumnScope.MultipleChoiceBody(
+    options: List<String>,
+    correct: String,
+    chosen: String?,
+    onChoose: (String) -> Unit,
+    onContinue: () -> Unit,
+) {
+    val answered = chosen != null
+    val gotIt = chosen == correct
+
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.tight)) {
+        options.forEach { option ->
+            val scheme = MaterialTheme.colorScheme
+            val background = when {
+                !answered -> scheme.surfaceVariant
+                option == correct -> scheme.primaryContainer
+                option == chosen -> scheme.errorContainer
+                else -> scheme.surfaceVariant
+            }
+            val foreground = when {
+                !answered -> scheme.onSurface
+                option == correct -> scheme.onPrimaryContainer
+                option == chosen -> scheme.onErrorContainer
+                else -> scheme.onSurfaceVariant
+            }
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = background,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(selected = option == chosen, onClick = { if (!answered) onChoose(option) }),
+            ) {
+                Text(
+                    option,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = foreground,
+                    modifier = Modifier.padding(horizontal = Spacing.gap, vertical = 14.dp),
+                )
+            }
+        }
+    }
+
+    if (answered) {
+        Text(
+            if (gotIt) "That's right." else "Not quite - the right one is highlighted.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (gotIt) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PrimaryButton(text = "Next", onClick = onContinue)
+    }
 }

@@ -108,7 +108,11 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                         "sends the pages you have read to Google Gemini automatically, without asking each " +
                         "time. Only pages you actually read are sent, never the whole book — but if a book " +
                         "is private, leave this off or exclude that book from its page in your library. " +
-                        "Roughly a thousand words per question; an hour of reading is about fifteen.",
+                        "Roughly a thousand words per question; an hour of reading is about fifteen.\n\n" +
+                        "The same reply also picks out up to two words from each stretch that you " +
+                        "probably do not know, and adds them to your words with a definition and three " +
+                        "wrong answers — so they can be answered with one tap. Nothing extra is sent to " +
+                        "do it, and a word you already have is never overwritten.",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -149,9 +153,10 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                                 }
                                 testResult = models.fold(
                                     onSuccess = { names ->
-                                        val outcome = GeminiTutor.generateReadingChecks(context, SAMPLE_PASSAGE)
+                                        val outcome = GeminiTutor.generatePassageStudy(context, SAMPLE_PASSAGE)
                                         outcome.fold(
-                                            onSuccess = { checks ->
+                                            onSuccess = { study ->
+                                                val checks = study.checks
                                                 // Every question is shown, not just the first: the
                                                 // test is now partly "does it find more than one
                                                 // idea in a passage", and one line would hide that.
@@ -163,6 +168,18 @@ fun AiSettingsScreen(onBack: () -> Unit) {
                                                     checks.forEach { check ->
                                                         append("\n\n${check.question}")
                                                         append("\nAnswer: ${check.correctAnswer}")
+                                                    }
+                                                    // Shown too, because the words are written
+                                                    // without being asked for and it is fair to see
+                                                    // what kind of thing that produces before it
+                                                    // starts adding cards to your deck.
+                                                    if (study.words.isEmpty()) {
+                                                        append("\n\nIt picked no words out - this passage has none it thought unfamiliar.")
+                                                    } else {
+                                                        append("\n\nWords it would add:")
+                                                        study.words.forEach { word ->
+                                                            append("\n\n${word.word} — ${word.definition}")
+                                                        }
                                                     }
                                                 }
                                             },

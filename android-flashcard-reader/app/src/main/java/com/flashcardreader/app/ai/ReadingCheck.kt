@@ -93,6 +93,8 @@ data class ReadingCheck(
          * Finds the JSON object in a reply. Models like to wrap JSON in prose or a ```json fence,
          * and rejecting an otherwise good answer over its packaging would be its own kind of bug.
          */
+        internal fun extractJsonObject(reply: String): JSONObject? = extractJson(reply)
+
         private fun extractJson(reply: String): JSONObject? {
             val start = reply.indexOf('{')
             val end = reply.lastIndexOf('}')

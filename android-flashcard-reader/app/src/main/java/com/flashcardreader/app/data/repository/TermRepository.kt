@@ -3,7 +3,9 @@ package com.flashcardreader.app.data.repository
 import com.flashcardreader.app.data.db.dao.OccurrenceDao
 import com.flashcardreader.app.data.db.dao.TermDao
 import com.flashcardreader.app.data.db.entities.CardState
+import com.flashcardreader.app.ai.VocabCard
 import com.flashcardreader.app.data.db.entities.Occurrence
+import com.flashcardreader.app.data.db.entities.ReadingCheckCard
 import com.flashcardreader.app.data.db.entities.ReviewContext
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.Confidence
@@ -29,17 +31,47 @@ class TermRepository(
     fun isDue(term: Term, now: Long): Boolean = fsrs.isDue(term, now)
 
     /** Tags a newly-selected word/phrase as a flashcard. Reuses an existing term if already tracked. */
-    suspend fun createOrGetTerm(rawText: String, definition: String): Term {
+    suspend fun createOrGetTerm(rawText: String, definition: String, distractors: String = ""): Term {
         val normalized = rawText.trim().lowercase()
-        termDao.findByNormalizedText(normalized)?.let { return it }
+        termDao.findByNormalizedText(normalized)?.let { existing ->
+            // Never overwrite a definition someone wrote themselves. Filling in absent wrong
+            // answers is different: it upgrades an old card to one tap without changing its answer.
+            if (distractors.isNotBlank() && existing.distractors.isBlank()) {
+                val upgraded = existing.copy(distractors = distractors)
+                termDao.update(upgraded)
+                return upgraded
+            }
+            return existing
+        }
         val term = Term(
             normalizedText = normalized,
             displayText = rawText.trim(),
             definition = definition,
+            distractors = distractors,
             createdAt = System.currentTimeMillis(),
         )
         val id = termDao.insert(term)
         return term.copy(id = id)
+    }
+
+    /**
+     * Saves the words an AI picked out of a passage, and reports how many were genuinely new.
+     *
+     * Words the reader already has are left exactly as they are - their own definition is theirs -
+     * so this can run on every stretch of reading without slowly rewriting their deck.
+     */
+    suspend fun saveAutoWords(cards: List<VocabCard>): Int {
+        var added = 0
+        for (card in cards) {
+            val before = termDao.findByNormalizedText(card.word.trim().lowercase())
+            createOrGetTerm(
+                rawText = card.word,
+                definition = card.definition,
+                distractors = ReadingCheckCard.joinDistractors(card.distractors),
+            )
+            if (before == null) added++
+        }
+        return added
     }
 
     suspend fun updateDefinition(term: Term, definition: String) {
@@ -134,6 +166,9 @@ class TermRepository(
                     .put("normalizedText", t.normalizedText)
                     .put("displayText", t.displayText)
                     .put("definition", t.definition)
+                    // Carried, or restoring on a new phone would turn every one-tap card back
+                    // into one you have to reveal and grade yourself.
+                    .put("distractors", t.distractors)
                     .put("createdAt", t.createdAt)
                     .put("difficulty", t.difficulty)
                     .put("stability", t.stability)
@@ -163,6 +198,7 @@ class TermRepository(
                     normalizedText = normalized,
                     displayText = o.optString("displayText", normalized),
                     definition = o.optString("definition", ""),
+                    distractors = o.optString("distractors", ""),
                     createdAt = o.optLong("createdAt", System.currentTimeMillis()),
                     difficulty = o.optDouble("difficulty", 0.0),
                     stability = o.optDouble("stability", 0.0),
