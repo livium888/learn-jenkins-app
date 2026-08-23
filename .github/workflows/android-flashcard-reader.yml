@@ -69,11 +69,12 @@ jobs:
       - name: Summarise failures
         if: failure()
         run: |
-          echo "::group::Kotlin compiler errors"
-          grep -hE "^e: |FAILED$|^\s+[a-zA-Z.]+Exception" "$GITHUB_WORKSPACE"/android-flashcard-reader/build/*.log 2>/dev/null || true
-          echo "::endgroup::"
-          echo "Re-running the failing task with errors only:"
-          ./gradlew assembleRelease 2>&1 | grep -E "^e: |^w: .*error|FAILED|Compilation error" | head -60 || true
+          # Both kinds of failure, because only matching compiler errors hid a configuration
+          # error twice - the build failed in under a second with nothing in the log to say why.
+          echo "Compiler errors, and the 'what went wrong' block if configuration failed:"
+          ./gradlew assembleRelease 2>&1 \
+            | awk '/^e: /{print} /\* What went wrong/,/\* Try:/{print}' \
+            | head -80 || true
 
       # Kept for anyone browsing the Actions run on desktop.
       - name: Upload release APK artifact
