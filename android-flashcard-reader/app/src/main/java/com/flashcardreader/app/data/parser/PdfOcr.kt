@@ -83,7 +83,7 @@ class PdfOcr(private val context: Context) {
 
         val tess = TessBaseAPI()
         if (!tess.init(tessRoot().absolutePath, language)) {
-            tess.recycle()
+            tess.end()
             throw IOException("Couldn't start the text recogniser")
         }
 
@@ -109,7 +109,7 @@ class PdfOcr(private val context: Context) {
                 }
             }
         } finally {
-            tess.recycle()
+            tess.end()
         }
     }
 
