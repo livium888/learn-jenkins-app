@@ -1,5 +1,8 @@
 package com.flashcardreader.app.stats
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,6 +59,9 @@ fun StatsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    // Read once when the screen opens rather than observed: it only changes from the reader or the
+    // review queue, never while this screen is in front of you.
+    var flagged by remember { mutableStateOf(viewModel.flaggedQuestions) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -76,8 +82,8 @@ fun StatsScreen(
                 context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             }
             if (text != null) {
-                val n = viewModel.importJson(text)
-                snackbar.showSnackbar(if (n > 0) "Restored $n words" else "Nothing new to restore")
+                val restored = viewModel.importJson(text)
+                snackbar.showSnackbar(describeRestore(restored))
             } else {
                 snackbar.showSnackbar("Couldn't read that file")
             }
@@ -160,6 +166,50 @@ fun StatsScreen(
                 )
             }
 
+            // Only appears once a question has actually been rejected. The questions are written
+            // by a model against a prompt that has never been evaluated; this is the only place
+            // that judgement gets recorded rather than being lost in the moment.
+            if (flagged > 0) {
+                SectionCard {
+                    SectionTitle("Questions you rejected")
+                    StatRow("Thrown away as bad", flagged.toString())
+                    Text(
+                        "Copy this and send it, and the questions can be made better. Each one is " +
+                            "kept with the lines it claimed as evidence.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Copy the report",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val clipboard = context
+                                    .getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                clipboard?.setPrimaryClip(
+                                    ClipData.newPlainText("Flagged questions", viewModel.flaggedQuestionsReport()),
+                                )
+                                scope.launch { snackbar.showSnackbar("Report copied") }
+                            }
+                            .padding(vertical = 8.dp),
+                    )
+                    Text(
+                        "Clear them",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.clearFlaggedQuestions()
+                                flagged = 0
+                            }
+                            .padding(vertical = 8.dp),
+                    )
+                }
+            }
+
             SectionCard {
                 SectionTitle("Flagged")
                 StatRow("★ Curious", stats.curious.toString())
@@ -192,7 +242,7 @@ fun StatsScreen(
             SectionCard {
                 SectionTitle("Backup")
                 Text(
-                    "Back up my words",
+                    "Back up everything",
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -208,8 +258,10 @@ fun StatsScreen(
                         .padding(vertical = 8.dp),
                 )
                 Text(
-                    "Saves your words + review schedule to a file you can move to a new phone. " +
-                        "Restoring adds any words not already here. Books aren't included.",
+                    "Saves your words, the questions written from your reading, and the review " +
+                        "history the schedule is fitted to - to one file you can move to a new " +
+                        "phone. Restoring adds anything not already here. Books aren't included; " +
+                        "they can be added again, the reading of them can't.",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

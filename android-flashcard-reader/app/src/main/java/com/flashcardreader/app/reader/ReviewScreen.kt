@@ -46,6 +46,7 @@ fun ReviewScreen(viewModel: ReviewViewModel, onBack: () -> Unit) {
                     onAnswered = viewModel::answerCurrentCheck,
                     onSkip = viewModel::skipCurrentCheck,
                     remaining = state.queue.size + state.checkQueue.size,
+                    onReject = viewModel::rejectCurrentCheck,
                 )
                 current == null -> Text(
                     "Nothing due right now — nice work.",

@@ -65,7 +65,7 @@ fun AppNavGraph(app: FlashcardReaderApp) {
         }
         composable(ROUTE_REVIEW) {
             val viewModel: ReviewViewModel = viewModel(
-                factory = viewModelFactory { initializer { ReviewViewModel(app.termRepository, app.libraryRepository, app.readingCheckRepository, app.focusPrefs, app.creditBank) } },
+                factory = viewModelFactory { initializer { ReviewViewModel(app.termRepository, app.libraryRepository, app.readingCheckRepository, app.focusPrefs, app.creditBank, app.questionFeedback) } },
             )
             ReviewScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
@@ -77,7 +77,7 @@ fun AppNavGraph(app: FlashcardReaderApp) {
         }
         composable(ROUTE_STATS) {
             val viewModel: StatsViewModel = viewModel(
-                factory = viewModelFactory { initializer { StatsViewModel(app.termRepository, app.calibration, app.readingCheckRepository, app.reviewHistory) } },
+                factory = viewModelFactory { initializer { StatsViewModel(app.termRepository, app.calibration, app.readingCheckRepository, app.reviewHistory, app.backupRepository, app.questionFeedback) } },
             )
             StatsScreen(
                 viewModel = viewModel,
@@ -127,6 +127,7 @@ fun AppNavGraph(app: FlashcardReaderApp) {
                             app.readerPrefs,
                             app.focusPrefs,
                             app.creditBank,
+                            feedback = app.questionFeedback,
                         )
                     }
                 },

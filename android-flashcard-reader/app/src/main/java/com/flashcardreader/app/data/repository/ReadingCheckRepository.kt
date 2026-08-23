@@ -55,6 +55,9 @@ class ReadingCheckRepository(
 
     suspend fun deleteForSource(sourceId: Long) = dao.deleteForSource(sourceId)
 
+    /** Removes a question judged to be a bad one, so it is never scheduled again. */
+    suspend fun discard(card: ReadingCheckCard) = dao.delete(card)
+
     /**
      * Records an answer and reschedules the card.
      *

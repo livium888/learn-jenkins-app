@@ -30,6 +30,14 @@ interface ReadingCheckDao {
     @Query("SELECT * FROM reading_checks WHERE sourceId = :sourceId ORDER BY charOffset ASC")
     suspend fun forSource(sourceId: Long): List<ReadingCheckCard>
 
+    /** Every question, for the backup. */
+    @Query("SELECT * FROM reading_checks ORDER BY createdAt ASC")
+    suspend fun getAll(): List<ReadingCheckCard>
+
+    /** Used to skip questions a backup would otherwise restore a second time. */
+    @Query("SELECT COUNT(*) FROM reading_checks WHERE question = :question")
+    suspend fun countByQuestion(question: String): Int
+
     @Query("SELECT COUNT(*) FROM reading_checks")
     fun observeCount(): Flow<Int>
 

@@ -1,7 +1,9 @@
 package com.flashcardreader.app
 
 import android.app.Application
+import com.flashcardreader.app.ai.QuestionFeedback
 import com.flashcardreader.app.data.db.AppDatabase
+import com.flashcardreader.app.data.repository.BackupRepository
 import com.flashcardreader.app.data.repository.CalibrationStore
 import com.flashcardreader.app.diagnostics.CrashLog
 import com.flashcardreader.app.data.repository.LibraryRepository
@@ -45,4 +47,17 @@ class FlashcardReaderApp : Application() {
         ReadingCheckRepository(database.readingCheckDao(), fsrs, reviewHistory)
     }
     val readingLog by lazy { ReadingLog(this) }
+
+    /** Questions marked as bad, kept so the prompt that writes them can be tuned from evidence. */
+    val questionFeedback by lazy { QuestionFeedback(this) }
+
+    /** Words, questions and review history together - everything a new phone cannot recreate. */
+    val backupRepository by lazy {
+        BackupRepository(
+            termRepository,
+            database.readingCheckDao(),
+            database.reviewLogDao(),
+            database.sourceDao(),
+        )
+    }
 }

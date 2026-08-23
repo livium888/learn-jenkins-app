@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,6 +47,8 @@ fun ReadingCheckDialog(
     onSkip: () -> Unit,
     /** How many cards are left in the review queue, when shown from there. */
     remaining: Int? = null,
+    /** Throws the question away as a bad one. Absent where there is nothing to throw away. */
+    onReject: (() -> Unit)? = null,
 ) {
     // Shuffled once per showing, so position never gives the answer away and never moves under a
     // finger mid-tap.
@@ -62,6 +65,7 @@ fun ReadingCheckDialog(
             onChoose = { chosen = it },
             onContinue = { onAnswered(chosen == check.correctAnswer) },
             onSkip = onSkip,
+            onReject = onReject,
         )
     }
 }
@@ -82,6 +86,7 @@ internal fun ColumnScope.ReadingCheckBody(
     onChoose: (String) -> Unit,
     onContinue: () -> Unit,
     onSkip: () -> Unit,
+    onReject: (() -> Unit)? = null,
 ) {
     val answered = chosen != null
     val correct = chosen == check.correctAnswer
@@ -144,6 +149,17 @@ internal fun ColumnScope.ReadingCheckBody(
             }
         }
         PrimaryButton(text = "Keep reading", onClick = onContinue)
+        // Only offered once the answer has been revealed. Before that there is nothing to judge,
+        // and a reject button would just be a second way to skip a question you found hard.
+        if (onReject != null) {
+            TextButton(onClick = onReject, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "This question doesn't work",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     } else {
         OutlineButton(text = "Skip", onClick = onSkip)
     }

@@ -11,6 +11,16 @@ interface ReviewLogDao {
     @Insert
     suspend fun insert(log: ReviewLog)
 
+    @Insert
+    suspend fun insertAll(logs: List<ReviewLog>)
+
+    /**
+     * The whole history, for the backup. Capped well above a decade of daily study - past that the
+     * oldest reviews add nothing a fit can use, and the file stops being something you can email.
+     */
+    @Query("SELECT * FROM review_logs ORDER BY reviewedAt ASC LIMIT 50000")
+    suspend fun getAll(): List<ReviewLog>
+
     @Query("SELECT COUNT(*) FROM review_logs")
     suspend fun count(): Int
 

@@ -363,6 +363,7 @@ fun ReaderScreen(
             check = readingCheck,
             onAnswered = viewModel::onReadingCheckAnswered,
             onSkip = viewModel::dismissReadingCheck,
+            onReject = viewModel::rejectReadingCheck,
         )
     } else if (state.pendingComprehension && state.pendingFlashcards.isEmpty()) {
         ComprehensionDialog(onDone = viewModel::dismissComprehension)

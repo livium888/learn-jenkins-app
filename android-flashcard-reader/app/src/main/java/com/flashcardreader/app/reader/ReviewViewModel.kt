@@ -2,6 +2,8 @@ package com.flashcardreader.app.reader
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.flashcardreader.app.ai.QuestionFeedback
+import com.flashcardreader.app.ai.ReadingCheck
 import com.flashcardreader.app.data.db.entities.ReadingCheckCard
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.fsrs.Confidence
@@ -39,6 +41,7 @@ class ReviewViewModel(
     private val readingCheckRepository: ReadingCheckRepository,
     private val focusPrefs: FocusPrefs,
     private val creditBank: CreditBank,
+    private val feedback: QuestionFeedback? = null,
 ) : ViewModel() {
 
     /** Whether Focus Gate is on, so cards can offer to earn time. */
@@ -99,6 +102,30 @@ class ReviewViewModel(
         val card = _uiState.value.checkQueue.firstOrNull() ?: return
         viewModelScope.launch {
             readingCheckRepository.answer(card, correct)
+            _uiState.update { it.copy(checkQueue = it.checkQueue.drop(1)) }
+            advanceAfterCheck()
+        }
+    }
+
+    /**
+     * Throws the current question away as a bad one, and keeps a copy of it for tuning.
+     *
+     * Deleted rather than merely buried: a question that is wrong or unfair should not come back
+     * on a schedule, and leaving it in the deck to be skipped forever is the worse of the two.
+     */
+    fun rejectCurrentCheck() {
+        val card = _uiState.value.checkQueue.firstOrNull() ?: return
+        viewModelScope.launch {
+            feedback?.record(
+                ReadingCheck(
+                    question = card.question,
+                    correctAnswer = card.correctAnswer,
+                    distractors = card.wrongOptions,
+                    evidence = card.evidence,
+                ),
+                book = libraryRepository.getSource(card.sourceId)?.title.orEmpty(),
+            )
+            readingCheckRepository.discard(card)
             _uiState.update { it.copy(checkQueue = it.checkQueue.drop(1)) }
             advanceAfterCheck()
         }

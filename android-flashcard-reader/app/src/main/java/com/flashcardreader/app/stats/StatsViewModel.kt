@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.data.db.entities.CardState
 import com.flashcardreader.app.data.db.entities.Term
+import com.flashcardreader.app.ai.QuestionFeedback
+import com.flashcardreader.app.data.repository.BackupRepository
 import com.flashcardreader.app.data.repository.CalibrationLevel
 import com.flashcardreader.app.data.repository.CalibrationStore
 import com.flashcardreader.app.data.repository.ReadingCheckCounts
@@ -50,6 +52,8 @@ class StatsViewModel(
     private val calibration: CalibrationStore,
     private val readingChecks: ReadingCheckRepository,
     private val reviewHistory: ReviewHistory,
+    private val backup: BackupRepository,
+    private val feedback: QuestionFeedback,
 ) : ViewModel() {
     // Combined so the comprehension questions refresh with everything else - a count that only
     // updated when a *word* changed would go stale exactly when someone came to check it.
@@ -72,9 +76,16 @@ class StatsViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Stats())
 
-    suspend fun exportJson(): String = termRepository.exportJson()
+    suspend fun exportJson(): String = backup.exportJson()
 
-    suspend fun importJson(json: String): Int = termRepository.importJson(json)
+    suspend fun importJson(json: String) = backup.importJson(json)
+
+    /** How many questions have been flagged as bad, for the Progress screen. */
+    val flaggedQuestions: Int get() = feedback.count
+
+    fun flaggedQuestionsReport(): String = feedback.report()
+
+    fun clearFlaggedQuestions() = feedback.clear()
 }
 
 private fun computeStats(terms: List<Term>): Stats {

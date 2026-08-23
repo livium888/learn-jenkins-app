@@ -23,4 +23,8 @@ interface SourceDao {
 
     @Query("SELECT * FROM sources WHERE id = :id")
     suspend fun getById(id: Long): Source?
+
+    /** A one-shot list rather than a Flow, for matching a backup's books back to this device's. */
+    @Query("SELECT * FROM sources")
+    suspend fun snapshot(): List<Source>
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flashcardreader.app.ai.AiPrefs
+import com.flashcardreader.app.ai.QuestionFeedback
 import com.flashcardreader.app.ai.GeminiTutor
 import com.flashcardreader.app.ai.ReadingCheck
 import com.flashcardreader.app.data.db.entities.Source
@@ -95,6 +96,7 @@ class ReaderViewModel(
     private val focusPrefs: FocusPrefs,
     private val creditBank: CreditBank,
     private val scanner: TermScanner = TermScanner(Fsrs()),
+    private val feedback: QuestionFeedback? = null,
 ) : ViewModel() {
 
     private val aiPrefs = AiPrefs(context)
@@ -497,6 +499,25 @@ class ReaderViewModel(
         viewModelScope.launch {
             val card = readingCheckRepository.byId(cardId) ?: return@launch
             readingCheckRepository.answer(card, correct)
+        }
+    }
+
+    /**
+     * Throws the question away as a bad one, keeping a copy of it so the prompt can be tuned.
+     *
+     * The alternative - skip it and let it come back on a schedule - would mean a question that is
+     * wrong or unanswerable gets asked repeatedly, which is worse than not asking at all.
+     */
+    fun rejectReadingCheck() {
+        val check = _uiState.value.pendingCheck
+        val cardId = pendingCheckId
+        clearCheckWindow()
+        if (check == null) return
+        viewModelScope.launch {
+            feedback?.record(check, book = _uiState.value.source?.title.orEmpty())
+            if (cardId != null) {
+                readingCheckRepository.byId(cardId)?.let { readingCheckRepository.discard(it) }
+            }
         }
     }
 
