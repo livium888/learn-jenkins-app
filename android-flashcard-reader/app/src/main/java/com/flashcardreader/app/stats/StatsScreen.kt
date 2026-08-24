@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flashcardreader.app.reminders.ReminderScheduler
 import com.flashcardreader.app.ui.AppTopBar
+import com.flashcardreader.app.data.repository.ReadingHistory
 import com.flashcardreader.app.data.repository.ReadingLog
 import com.flashcardreader.app.ui.SectionCard
 import com.flashcardreader.app.ui.Spacing
@@ -421,6 +422,10 @@ private fun ReadingAttentionCard() {
     val open = log.openSecondsToday
     val read = log.readSecondsToday
     val pct = log.attentionPct
+    val history = remember { log.history() }
+    val today = remember { java.time.LocalDate.now().toEpochDay() }
+    val daysRead = remember(history) { ReadingHistory.daysReadIn(history, today, days = 30) }
+    val monthRead = remember(history) { ReadingHistory.readSecondsIn(history, today, days = 30) }
 
     SectionCard {
         SectionTitle("Attention")
@@ -437,6 +442,20 @@ private fun ReadingAttentionCard() {
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        // Days are kept now rather than wiped at midnight. Shown as a count of days and a total,
+        // deliberately not as a streak: a streak punishes one missed day and rewards opening the
+        // app to keep a number alive, which is the opposite of what everything else here measures.
+        if (daysRead > 0) {
+            StatRow("Days read, last 30", "$daysRead")
+            StatRow("Read in those 30 days", formatReadingMinutes(monthRead))
+        } else {
+            Text(
+                "Days you read are kept from now on, so this fills in over the next week.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

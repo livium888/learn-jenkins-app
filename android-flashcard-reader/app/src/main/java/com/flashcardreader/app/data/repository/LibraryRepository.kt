@@ -131,6 +131,14 @@ class LibraryRepository(
     /** Bookmarks for a book, newest first, read from its sidecar file. */
     suspend fun readBookmarks(source: Source): List<Bookmark> = withContext(Dispatchers.IO) {
         val file = bookmarksFile(source)
+        // Bookmarks used to live beside the cached text, inside the folder that is excluded from
+        // cloud backup because it holds whole books. They are the one thing in there a person made
+        // by hand, and they were quietly not surviving a reinstall. Anything still in the old place
+        // is moved on first read, so nobody loses one in the change.
+        if (!file.exists()) {
+            val legacy = legacyBookmarksFile(source)
+            if (legacy.exists()) runCatching { legacy.copyTo(file, overwrite = true); legacy.delete() }
+        }
         if (!file.exists()) return@withContext emptyList()
         runCatching {
             val arr = JSONArray(file.readText())
@@ -223,6 +231,7 @@ class LibraryRepository(
         pageCacheFile(source).delete()
         tocFile(source).delete()
         bookmarksFile(source).delete()
+        legacyBookmarksFile(source).delete()
         creditedFile(source).delete()
         readFile(source).delete()
         legacyCreditedFile(source).delete()
@@ -235,7 +244,19 @@ class LibraryRepository(
     private fun tocFile(source: Source): File =
         File("${source.textFilePath.removeSuffix(".txt")}.toc.json")
 
-    private fun bookmarksFile(source: Source): File =
+    /**
+     * Where a book's bookmarks live: outside the book-text folder, so they are backed up.
+     *
+     * Named from the text file so two books can never collide, and kept in its own directory so the
+     * broad "no book text in the cloud" exclusion does not sweep them up with it.
+     */
+    private fun bookmarksFile(source: Source): File {
+        val dir = File(context.filesDir, "bookmarks").apply { mkdirs() }
+        return File(dir, File(source.textFilePath).name.removeSuffix(".txt") + ".json")
+    }
+
+    /** The old location, inside the excluded folder. Only read, and only to move it out. */
+    private fun legacyBookmarksFile(source: Source): File =
         File("${source.textFilePath.removeSuffix(".txt")}.bookmarks.json")
 
     /**

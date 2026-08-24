@@ -1,13 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Auto Backup rules for Android 11 and below (fullBackupContent). Everything is backed up by
-  default (so flashcards/reading state survive a reinstall) EXCEPT the AI-tutor stores, which
-  hold the Gemini API key. Keeping a credential out of the cloud backup is the point.
+  What does NOT leave this phone, and why.
 
-  Book text is excluded too. The app asks before sending pages to Gemini and then let whole books -
-  personal documents included - go to Google's cloud silently, which was inconsistent with itself.
-  The Room database still backs up, so words, questions and review history survive a reinstall;
-  only the books themselves need re-importing.
+    ai_prefs / ai_prefs_secure        hold the Gemini API key
+    catalog_credentials(_secure)      hold library sign-ins
+    focus_credit                      the banked balance; restorable credit would be farmable
+    focus_prefs                       which apps are gated - a list of habits, not a setting
+    sources/                          the full cached text of every book, personal documents
+                                      included. The app asks before sending a page to Gemini, so
+                                      letting whole books go to the cloud silently would have
+                                      contradicted that.
+    flagged-questions.json            holds verbatim book excerpts
+    last-crash.txt                    a stack trace, which carries file paths
+
+  What DOES survive a reinstall: the Room database - words, questions, chapter passes, review
+  history - plus bookmarks and the day-by-day reading log. Only the books themselves need
+  re-importing.
+
+  Two deliberate choices worth naming rather than leaving to be inferred:
+
+  Bookmarks are no longer stored inside sources/. They were, which meant the one thing in that
+  folder a person made by hand was silently not surviving a reinstall while this comment claimed
+  otherwise. They now live in bookmarks/ and are backed up.
+
+  reading_log is no longer excluded. It used to hold two numbers that were destroyed at midnight;
+  it now holds the day-by-day history, which is exactly the kind of thing worth surviving a new
+  phone, and it contains no credential - only durations.
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="ai_prefs.xml" />
@@ -16,7 +34,7 @@
     <exclude domain="sharedpref" path="focus_prefs.xml" />
     <exclude domain="sharedpref" path="catalog_credentials.xml" />
     <exclude domain="sharedpref" path="catalog_credentials_secure.xml" />
-    <exclude domain="sharedpref" path="reading_log.xml" />
     <exclude domain="file" path="sources" />
     <exclude domain="file" path="flagged-questions.json" />
+    <exclude domain="file" path="last-crash.txt" />
 </full-backup-content>

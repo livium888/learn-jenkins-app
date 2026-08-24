@@ -133,6 +133,9 @@ internal fun ColumnScope.ReadingCheckBody(
                     else -> OptionState.MUTED
                 },
                 onClick = { if (!answered) onChoose(option) },
+                // What the *reader* picked, not what was right. Announcing the correct option as
+                // selected told a TalkBack user who got it wrong that they had picked it.
+                picked = option == chosen,
             )
         }
     }
@@ -204,7 +207,7 @@ internal fun ReadingCheckPreviewBody(check: ReadingCheck, chosen: String?) {
 private enum class OptionState { UNANSWERED, CORRECT, WRONG, MUTED }
 
 @Composable
-private fun OptionRow(text: String, state: OptionState, onClick: () -> Unit) {
+private fun OptionRow(text: String, state: OptionState, onClick: () -> Unit, picked: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     val background = when (state) {
         OptionState.UNANSWERED -> colors.surfaceVariant
@@ -223,7 +226,7 @@ private fun OptionRow(text: String, state: OptionState, onClick: () -> Unit) {
         color = background,
         modifier = Modifier
             .fillMaxWidth()
-            .selectable(selected = state == OptionState.CORRECT, onClick = onClick),
+            .selectable(selected = picked, onClick = onClick),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = Spacing.gap, vertical = 14.dp),
