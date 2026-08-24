@@ -41,6 +41,10 @@ fun ReaderSettingsSheet(
     sourceId: Long = 0,
     /** Why a reading question has or hasn't appeared - built fresh each time it's shown. */
     readingCheckReport: () -> String = { "" },
+    /** Why the chosen font isn't the one on screen, or null when it is. */
+    fontError: String? = null,
+    /** Throw the cached font away and fetch it again. */
+    onRetryFont: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val aiPrefs = remember { AiPrefs(context) }
@@ -119,19 +123,30 @@ fun ReaderSettingsSheet(
                 )
             }
         }
+        // OpenDyslexic and Atkinson are fetched on first use. That used to fail in silence, so
+        // choosing one on a phone that could not reach the CDN looked like a setting being ignored.
+        if (fontError != null) {
+            Text(
+                "${typography.font.label} isn't downloaded yet — $fontError. " +
+                    "Showing a plain sans-serif until it arrives.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            TextButton(onClick = onRetryFont) { Text("Try downloading it again") }
+        }
 
-        Label("Text size: ${typography.fontSizeSp.toInt()}sp")
-        Slider(
+        LayoutSlider(
             value = typography.fontSizeSp,
-            onValueChange = { onChange(typography.copy(fontSizeSp = it)) },
-            valueRange = 12f..28f,
+            range = 12f..28f,
+            label = { "Text size: ${it.toInt()}sp" },
+            onCommit = { onChange(typography.copy(fontSizeSp = it)) },
         )
 
-        Label("Line spacing: ×${"%.1f".format(typography.lineHeightMultiplier)}")
-        Slider(
+        LayoutSlider(
             value = typography.lineHeightMultiplier,
-            onValueChange = { onChange(typography.copy(lineHeightMultiplier = it)) },
-            valueRange = 1.0f..2.2f,
+            range = 1.0f..2.2f,
+            label = { "Line spacing: ×${"%.1f".format(it)}" },
+            onCommit = { onChange(typography.copy(lineHeightMultiplier = it)) },
         )
 
         Label("Theme")
@@ -160,18 +175,18 @@ fun ReaderSettingsSheet(
             )
         }
 
-        Label("Margins: ×${"%.1f".format(typography.marginScale)}")
-        Slider(
+        LayoutSlider(
             value = typography.marginScale,
-            onValueChange = { onChange(typography.copy(marginScale = it)) },
-            valueRange = 0.5f..2.5f,
+            range = 0.5f..2.5f,
+            label = { "Margins: ×${"%.1f".format(it)}" },
+            onCommit = { onChange(typography.copy(marginScale = it)) },
         )
 
-        Label("Letter spacing: ${(typography.letterSpacingEm * 100).toInt()}")
-        Slider(
+        LayoutSlider(
             value = typography.letterSpacingEm,
-            onValueChange = { onChange(typography.copy(letterSpacingEm = it)) },
-            valueRange = 0f..0.2f,
+            range = 0f..0.2f,
+            label = { "Letter spacing: ${(it * 100).toInt()}" },
+            onCommit = { onChange(typography.copy(letterSpacingEm = it)) },
         )
 
         TextButton(onClick = {
@@ -219,4 +234,35 @@ fun ReaderSettingsSheet(
 @Composable
 private fun Label(text: String) {
     Text(text, style = MaterialTheme.typography.labelLarge)
+}
+
+/**
+ * A slider for something that changes where the lines fall, committed once per gesture.
+ *
+ * Every one of these re-lays-out the whole book. Slider.onValueChange fires on every pixel of a
+ * drag, so committing there restarted the pagination of a few hundred pages dozens of times a
+ * second, cancelling each attempt before it could finish - and the page breaks never changed. From
+ * a reader's side, the slider simply did nothing, while brightness and warmth (which touch no
+ * layout) worked fine.
+ *
+ * The handle still moves with the finger, because the position is held here; only the commit
+ * waits for the finger to lift.
+ */
+@Composable
+private fun LayoutSlider(
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    label: (Float) -> String,
+    onCommit: (Float) -> Unit,
+) {
+    var dragging by remember { mutableStateOf(false) }
+    var local by remember(value) { mutableStateOf(value) }
+    val shown = if (dragging) local else value
+    Label(label(shown))
+    Slider(
+        value = shown,
+        onValueChange = { dragging = true; local = it },
+        onValueChangeFinished = { dragging = false; onCommit(local) },
+        valueRange = range,
+    )
 }

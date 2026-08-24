@@ -18,21 +18,35 @@ fun colorsFor(palette: ReaderPalette): ReaderColors = when (palette) {
 }
 
 /**
- * A reader font. System fonts carry a ready FontFamily; accessibility fonts carry a [downloadUrl]
+ * A reader font. System fonts carry a ready FontFamily; accessibility fonts carry [downloadUrls]
  * and are fetched on first use (see FontLoader), falling back to [family] until/if they load.
  */
-enum class ReaderFont(val family: FontFamily, val label: String, val downloadUrl: String? = null) {
+enum class ReaderFont(
+    val family: FontFamily,
+    val label: String,
+    /**
+     * Where to fetch the font, most-preferred first. The same file from independent hosts, so one
+     * of them being blocked or down costs a retry rather than the font.
+     */
+    val downloadUrls: List<String> = emptyList(),
+) {
     SERIF(FontFamily.Serif, "Serif"),
     SANS(FontFamily.SansSerif, "Sans-serif"),
     OPEN_DYSLEXIC(
         FontFamily.SansSerif,
         "OpenDyslexic",
-        "https://cdn.jsdelivr.net/gh/antijingoist/opendyslexic/compiled/OpenDyslexic-Regular.otf",
+        listOf(
+            "https://cdn.jsdelivr.net/gh/antijingoist/opendyslexic/compiled/OpenDyslexic-Regular.otf",
+            "https://raw.githubusercontent.com/antijingoist/opendyslexic/master/compiled/OpenDyslexic-Regular.otf",
+        ),
     ),
     ATKINSON(
         FontFamily.SansSerif,
         "Atkinson",
-        "https://cdn.jsdelivr.net/gh/google/fonts/ofl/atkinsonhyperlegible/AtkinsonHyperlegible-Regular.ttf",
+        listOf(
+            "https://cdn.jsdelivr.net/gh/google/fonts/ofl/atkinsonhyperlegible/AtkinsonHyperlegible-Regular.ttf",
+            "https://raw.githubusercontent.com/google/fonts/main/ofl/atkinsonhyperlegible/AtkinsonHyperlegible-Regular.ttf",
+        ),
     ),
 }
 

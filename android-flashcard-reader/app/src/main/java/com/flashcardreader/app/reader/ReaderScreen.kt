@@ -76,6 +76,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.flashcardreader.app.data.parser.Chapter
 import com.flashcardreader.app.theme.FontLoader
+import com.flashcardreader.app.theme.LoadedFont
 import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.theme.ReaderColors
@@ -124,10 +125,17 @@ fun ReaderScreen(
     val pagerState = rememberPagerState(pageCount = { state.chunks.size })
 
     // Resolve the reader font: system fonts are instant; accessibility fonts (OpenDyslexic,
-    // Atkinson) download on first use and fall back to sans-serif until ready.
-    val fontFamily by produceState(initialValue = typography.font.family, typography.font) {
-        value = FontLoader.familyFor(context, typography.font)
+    // Atkinson) download on first use. A failure used to be swallowed, so choosing one of them on
+    // a phone that could not reach the CDN simply did nothing; now it says so and can be retried.
+    var fontAttempt by remember { mutableStateOf(0) }
+    val loadedFont by produceState(
+        initialValue = LoadedFont(typography.font.family),
+        typography.font,
+        fontAttempt,
+    ) {
+        value = FontLoader.load(context, typography.font)
     }
+    val fontFamily = loadedFont.family
 
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
@@ -354,6 +362,11 @@ fun ReaderScreen(
 
             LaunchedEffect(signature, state.fullText) {
                 if (state.fullText.isEmpty() || pageWidthPx <= 0 || pageHeightPx <= 0f) return@LaunchedEffect
+                // Coalesce a run of changes into one layout. Toggling justify and then dragging a
+                // margin would otherwise start a fresh pass over the whole book for each step, and
+                // each pass is cancelled by the next - so none of them ever finishes.
+                delay(RELAYOUT_DEBOUNCE_MS)
+                viewModel.onRelayoutStarted()
                 val cached = viewModel.cachedPages(signature)
                 if (cached != null) {
                     viewModel.onPaginated(cached, signature)
@@ -416,6 +429,18 @@ fun ReaderScreen(
                 }
             }
 
+            // Changing anything that moves the lines re-lays-out the whole book, which takes a
+            // moment on a long one. Drawn over the pages rather than under them, and last so it is
+            // not hidden: silence here is what made the sliders look inert even once they worked.
+            if (state.relayouting && state.paginated) {
+                LinearProgressIndicator(
+                    progress = { state.paginatingProgress },
+                    color = colors.accent,
+                    trackColor = colors.background,
+                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
+                )
+            }
+
             // Night warmth: a non-interactive warm overlay that cuts blue light.
             if (typography.warmth > 0f) {
                 Box(
@@ -474,6 +499,11 @@ fun ReaderScreen(
             onDismiss = { showSettings = false },
             sourceId = state.source?.id ?: 0L,
             readingCheckReport = viewModel::readingCheckReport,
+            fontError = loadedFont.error,
+            onRetryFont = {
+                FontLoader.forget(context, typography.font)
+                fontAttempt++
+            },
         )
     }
 
@@ -908,4 +938,11 @@ private fun clipboardText(context: Context): String {
 }
 
 /** How often the Focus Gate credit tracker samples the viewport. */
+/**
+ * How long to wait after a typography change before laying the book out again.
+ *
+ * Long enough that a run of changes becomes one layout, short enough not to feel like lag.
+ */
+private const val RELAYOUT_DEBOUNCE_MS = 250L
+
 private const val CREDIT_TICK_MS = 500L

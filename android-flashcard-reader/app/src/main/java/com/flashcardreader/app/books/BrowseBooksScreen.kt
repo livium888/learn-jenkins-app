@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.flashcardreader.app.data.books.CustomFeed
 import com.flashcardreader.app.data.books.KnownCatalogs
 import com.flashcardreader.app.data.books.RemoteBook
 import com.flashcardreader.app.ui.AppDialog
@@ -277,6 +279,8 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                 showAddCatalog = false
                 viewModel.addCustomFeed(name, url, user, pass)
             },
+            existing = state.customFeeds,
+            onRemove = viewModel::removeCustomFeed,
         )
     }
 
@@ -390,7 +394,12 @@ private fun SignInDialog(
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String, String, String) -> Unit) {
+private fun AddCatalogDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String, String, String, String) -> Unit,
+    existing: List<CustomFeed>,
+    onRemove: (String) -> Unit,
+) {
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
     var user by remember { mutableStateOf("") }
@@ -461,11 +470,41 @@ private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String, Stri
             shape = MaterialTheme.shapes.medium,
             modifier = Modifier.fillMaxWidth(),
         )
+        Text(
+            KnownCatalogs.SELF_HOSTED_HINT,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         PrimaryButton(
             text = "Add catalogue",
             enabled = url.isNotBlank(),
             onClick = { onAdd(name, url, user, pass) },
         )
+
+        // Catalogues you have added, and a way to take one away. Without this a feed could be
+        // added and never listed or removed - a dead one stayed in the picker for good.
+        if (existing.isNotEmpty()) {
+            Text("Your catalogues", style = MaterialTheme.typography.labelLarge)
+            existing.forEach { feed ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(feed.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            feed.url,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    TextButton(onClick = { onRemove(feed.url) }) { Text("Remove") }
+                }
+            }
+        }
         OutlineButton(text = "Cancel", onClick = onDismiss)
     }
 }

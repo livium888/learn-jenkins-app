@@ -117,6 +117,14 @@ data class ReaderUiState(
     val openPass: ChapterRecallCard? = null,
     /** True while a chapter's pass is being written, so the reader can say so rather than nothing. */
     val writingChapterPass: Boolean = false,
+    /**
+     * True while the book is being laid out again after a settings change.
+     *
+     * Distinct from `paginated`, which stays true throughout: the old pages remain readable while
+     * the new ones are measured, so there is no flash of an empty reader - but something has to say
+     * that work is happening, or a slider that takes three seconds to bite looks broken.
+     */
+    val relayouting: Boolean = false,
     // verifiedSeconds used to live here. It was recomputed twice a second - recomposing the whole
     // reader tree each time - and read by no composable; the open-vs-read mirror it was built for
     // is drawn on Progress from ReadingLog instead. The measurement is unaffected: pendingReadMs
@@ -310,6 +318,7 @@ class ReaderViewModel(
                     currentCharOffset = built.getOrNull(startIndex)?.startChar ?: 0,
                     paginated = true,
                     paginatingProgress = 1f,
+                    relayouting = false,
                 )
             }
             // Kept so the next opening of this book, at this size and this typography, is instant.
@@ -326,6 +335,11 @@ class ReaderViewModel(
         val source = _uiState.value.source ?: return null
         val cached = runCatching { libraryRepository.loadCachedPageOffsets(source, signature) }.getOrNull()
         return cached?.map { (start, end) -> Page(start, end) }
+    }
+
+    /** A re-layout has begun. Only meaningful after the first one; the first shows its own notice. */
+    fun onRelayoutStarted() {
+        if (_uiState.value.paginated) _uiState.update { it.copy(relayouting = true, paginatingProgress = 0f) }
     }
 
     fun onPaginationProgress(fraction: Float) {

@@ -61,10 +61,17 @@ object Catalogs {
 /**
  * Public OPDS catalogues offered as one-tap suggestions when adding a source.
  *
- * These are *not* built in as permanent chips, and the difference is deliberate: they are addresses
- * published for OPDS readers, but nothing here can confirm any of them still answers - so they are
- * offered as a starting point you add and test with the source report, rather than presented as
- * sources the app promises work. Everything listed is public-domain or openly licensed.
+ * These are *not* built in as permanent chips, and the difference is deliberate. They are addresses
+ * their libraries publish for OPDS readers, but an address is not a promise: feeds move, go behind
+ * logins, and quietly stop answering. Nothing in this app can confirm one works until it is tried
+ * on your own network - so adding a suggestion tests it and tells you what came back, rather than
+ * adding a chip that may turn out to be dead.
+ *
+ * Everything listed is public-domain or openly licensed. Sites that distribute in-copyright books
+ * without permission are deliberately absent and will not be added: the app is built to be run in
+ * the open, and a reading habit is not worth building on something that can vanish overnight.
+ * Anything not listed here can still be pasted in by hand, including your own Calibre-Web or COPS
+ * server, which is the intended route for a library you already own.
  */
 object KnownCatalogs {
     data class Suggestion(val name: String, val url: String, val note: String)
@@ -76,8 +83,13 @@ object KnownCatalogs {
             "Gutenberg's own feed - a second route in if the search above is timing out.",
         ),
         Suggestion(
-            "Feedbooks",
-            "https://catalog.feedbooks.com/catalog/index.atom",
+            "Standard Ebooks",
+            "https://standardebooks.org/feeds/opds",
+            "Public-domain classics, carefully re-typeset. The best-made free EPUBs there are.",
+        ),
+        Suggestion(
+            "Feedbooks (public domain)",
+            "https://catalog.feedbooks.com/catalog/public_domain.atom",
             "Public-domain classics, well organised by subject.",
         ),
         Suggestion(
@@ -95,5 +107,24 @@ object KnownCatalogs {
             "https://library.oapen.org/opds",
             "Open-access academic books, if you want something drier.",
         ),
+        Suggestion(
+            "Directory of Open Access Books",
+            "https://directory.doabooks.org/feed/opds",
+            "Peer-reviewed scholarly books, all open access.",
+        ),
+        Suggestion(
+            "Unglue.it",
+            "https://unglue.it/api/opds/",
+            "Books whose rights were bought out so they could be given away.",
+        ),
+        Suggestion(
+            "Wolne Lektury",
+            "https://wolnelektury.pl/api/opds/",
+            "Polish literature, free and openly licensed.",
+        ),
     )
+
+    /** The shape of a self-hosted feed, shown as a hint rather than offered as a suggestion. */
+    const val SELF_HOSTED_HINT = "Your own library works too - a Calibre-Web server's feed is " +
+        "usually http://your-server:8083/opds, and COPS is .../feed.php"
 }
