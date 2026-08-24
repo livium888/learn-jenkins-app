@@ -9,6 +9,7 @@ import com.flashcardreader.app.diagnostics.CrashLog
 import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.fsrs.Fsrs
 import com.flashcardreader.app.data.fsrs.IntervalFormat
+import com.flashcardreader.app.data.repository.ChapterRecallRepository
 import com.flashcardreader.app.data.repository.ReadingCheckRepository
 import com.flashcardreader.app.data.repository.ReviewHistory
 import com.flashcardreader.app.data.repository.ReadingLog
@@ -48,6 +49,10 @@ class FlashcardReaderApp : Application() {
     val readerPrefs by lazy { ReaderPrefs(this) }
     val focusPrefs by lazy { FocusPrefs(this) }
     val creditBank by lazy { CreditBank(this) }
+    val chapterRecallRepository by lazy {
+        ChapterRecallRepository(database.chapterRecallDao(), fsrs, reviewHistory)
+    }
+
     val readingCheckRepository by lazy {
         ReadingCheckRepository(database.readingCheckDao(), fsrs, reviewHistory)
     }

@@ -8,6 +8,7 @@ import com.flashcardreader.app.ai.QuestionFeedback
 import com.flashcardreader.app.data.db.entities.ReviewContext
 import com.flashcardreader.app.ai.GeminiTutor
 import com.flashcardreader.app.ai.ReadingCheck
+import com.flashcardreader.app.data.db.entities.ChapterRecallCard
 import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.data.db.entities.Term
 import com.flashcardreader.app.data.parser.Chapter
@@ -15,6 +16,7 @@ import com.flashcardreader.app.data.fsrs.Confidence
 import com.flashcardreader.app.data.fsrs.Fsrs
 import com.flashcardreader.app.data.fsrs.Rating
 import com.flashcardreader.app.data.repository.Bookmark
+import com.flashcardreader.app.data.repository.ChapterRecallRepository
 import com.flashcardreader.app.data.repository.LibraryRepository
 import com.flashcardreader.app.data.repository.OccurrenceLog
 import com.flashcardreader.app.data.repository.ReadingCheckRepository
@@ -103,6 +105,18 @@ data class ReaderUiState(
     val checkDue: Boolean = false,
     /** Plain-language status of the reading checks, so a silent feature can be diagnosed. */
     val checkStatus: String = "",
+    /**
+     * A chapter pass that has been written and is waiting.
+     *
+     * Deliberately separate from [openPass]: a waiting pass is a quiet banner and must NOT stop
+     * reading accruing, while an open one covers the text and must. Conflating the two would mean
+     * finishing a chapter silently switched the credit tracker off.
+     */
+    val pendingPass: ChapterRecallCard? = null,
+    /** The pass currently on screen. */
+    val openPass: ChapterRecallCard? = null,
+    /** True while a chapter's pass is being written, so the reader can say so rather than nothing. */
+    val writingChapterPass: Boolean = false,
     // verifiedSeconds used to live here. It was recomputed twice a second - recomposing the whole
     // reader tree each time - and read by no composable; the open-vs-read mirror it was built for
     // is drawn on Progress from ReadingLog instead. The measurement is unaffected: pendingReadMs
@@ -115,6 +129,7 @@ class ReaderViewModel(
     private val libraryRepository: LibraryRepository,
     private val termRepository: TermRepository,
     private val readingCheckRepository: ReadingCheckRepository,
+    private val chapterRecallRepository: ChapterRecallRepository,
     private val readingLog: ReadingLog,
     private val readerPrefs: ReaderPrefs,
     private val focusPrefs: FocusPrefs,
@@ -199,6 +214,12 @@ class ReaderViewModel(
     /** The in-flight in-book search, cancelled when a new query arrives. */
     private var searchJob: Job? = null
 
+    /** Chapters of this book that already have a pass, so one is never written or offered twice. */
+    private var chaptersWithPass = mutableSetOf<Int>()
+
+    /** Guards against two overlapping generations when several flushes land close together. */
+    private var writingPass = false
+
     init {
         viewModelScope.launch {
             val source = libraryRepository.getSource(sourceId)
@@ -208,7 +229,16 @@ class ReaderViewModel(
             val chapters = source?.let { libraryRepository.readChapters(it) } ?: emptyList()
             val bookmarks = source?.let { libraryRepository.readBookmarks(it) } ?: emptyList()
             // Pages already paid for in a previous session must never earn again.
-            source?.let { creditTracker.restore(libraryRepository.readCreditedChunks(it)) }
+            source?.let {
+                creditTracker.restore(
+                    previouslyCredited = libraryRepository.readCreditedChunks(it),
+                    // The read set is what chapter completion is measured from - see ChapterProgress.
+                    previouslyRead = libraryRepository.readReadChunks(it),
+                )
+            }
+            chaptersWithPass = runCatching {
+                chapterRecallRepository.chaptersWithPass(sourceId).toMutableSet()
+            }.getOrDefault(mutableSetOf())
             // Questions this book has already produced, which are due to be asked again.
             dueFromThisBook = runCatching {
                 val now = System.currentTimeMillis()
@@ -398,6 +428,24 @@ class ReaderViewModel(
         if (readSeconds > 0) {
             readingLog.addRead(readSeconds)
             pendingReadMs -= readSeconds * 1000
+        }
+        persistReadChunks()
+    }
+
+    /**
+     * Writes out which stretches of the book have genuinely been read.
+     *
+     * On the same 30-second flush as the reading log, for the same reason: process death should
+     * cost half a minute of evidence, not a session's worth. This is what chapter completion is
+     * measured from, so losing it would mean a chapter read carefully never counted as finished.
+     */
+    private fun persistReadChunks() {
+        val source = _uiState.value.source ?: return
+        val read = creditTracker.readChunks.toSet()
+        if (read.isEmpty()) return
+        viewModelScope.launch {
+            libraryRepository.saveReadChunks(source, read)
+            maybeWriteChapterPass()
         }
     }
 
@@ -642,6 +690,126 @@ class ReaderViewModel(
         }
     }
 
+    // ---------------------------------------------------------------- the chapter pass
+
+    /**
+     * Writes the pass for a chapter that has just been finished, if there is one.
+     *
+     * Never interrupts. The pass is written in the background and left waiting; the reader is told
+     * one is ready and takes it when they stop, which is the whole point - metacomprehension
+     * accuracy is far better when the recall step comes after the reading rather than inside it.
+     */
+    private suspend fun maybeWriteChapterPass() {
+        if (writingPass) return
+        val state = _uiState.value
+        if (state.pendingPass != null || state.openPass != null) return
+        if (!aiPrefs.readingChecks || sourceId in aiPrefs.excludedSources || !aiPrefs.isReady) return
+        // Chapters come from the table of contents; PDFs recover none, so there is nothing to close.
+        if (state.chapters.isEmpty()) return
+
+        val spans = ChapterProgress.spans(
+            anchors = state.chapters.map { it.title to it.charOffset },
+            textLength = state.fullText.length,
+        )
+        val finished = ChapterProgress.finished(
+            spans = spans,
+            readBuckets = creditTracker.readChunks,
+            bucketChars = ReadingCreditTracker.CREDIT_BUCKET_CHARS,
+            alreadyDone = chaptersWithPass,
+        ).firstOrNull() ?: return
+
+        writingPass = true
+        // Claimed before the call so a second flush 30 seconds later cannot start the same one again.
+        chaptersWithPass.add(finished.index)
+        _uiState.update { it.copy(writingChapterPass = true) }
+        val text = chapterTextFor(finished)
+        val result = GeminiTutor.generateChapterRecall(context, finished.title, text)
+        writingPass = false
+        _uiState.update { it.copy(writingChapterPass = false) }
+
+        result.onSuccess { recall ->
+            chapterRecallRepository.save(
+                recall = recall,
+                sourceId = sourceId,
+                chapterIndex = finished.index,
+                chapterTitle = finished.title,
+                startChar = finished.startChar,
+                endChar = finished.endChar,
+            )
+            val card = chapterRecallRepository.forChapter(sourceId, finished.index)
+            if (card != null) _uiState.update { it.copy(pendingPass = card) }
+        }.onFailure { error ->
+            // Let it be tried again on a later flush rather than losing the chapter for good.
+            chaptersWithPass.remove(finished.index)
+            _uiState.update { it.copy(checkStatus = "Chapter pass: " + error.message) }
+        }
+    }
+
+    /**
+     * The text to write a chapter's pass from.
+     *
+     * Prefers the sentences already quoted back by this chapter's own questions: those were sent
+     * once already, so a chapter read normally costs no new book text leaving the device. Only when
+     * there is too little of that to work with does the chapter itself get sent - under the same
+     * consent as everything else, and capped.
+     */
+    private suspend fun chapterTextFor(span: ChapterSpan): String {
+        val quoted = runCatching {
+            readingCheckRepository.forSource(sourceId)
+                .filter { it.charOffset >= span.startChar && it.charOffset < span.endChar }
+                .sortedBy { it.charOffset }
+                .joinToString(SUBMITTED_SEPARATOR) { it.evidence }
+        }.getOrDefault("")
+        if (quoted.length >= MIN_QUOTED_CHARS) return quoted
+        val text = _uiState.value.fullText
+        val from = span.startChar.coerceIn(0, text.length)
+        val to = span.endChar.coerceIn(from, text.length)
+        return text.substring(from, to).take(MAX_CHAPTER_CHARS)
+    }
+
+    /** Opens the waiting pass, which covers the text and stops reading accruing while it is up. */
+    fun openChapterPass() {
+        _uiState.update { it.copy(openPass = it.pendingPass, pendingPass = null) }
+    }
+
+    /**
+     * Puts the pass away without answering it.
+     *
+     * Nothing is lost: the card was saved when it was written and has never been answered, so it
+     * is still due and comes back in the review queue.
+     */
+    fun dismissChapterPass() {
+        _uiState.update { it.copy(pendingPass = null, openPass = null) }
+    }
+
+    /**
+     * Records a finished pass. [chosen] is which claims were tapped; [order] is the hints' true
+     * indices in the order the reader placed them.
+     *
+     * The rating is derived from both, never asked for - see PassScore.
+     */
+    fun answerChapterPass(chosen: Set<Int>, order: List<Int>) {
+        val card = _uiState.value.openPass ?: return
+        _uiState.update { it.copy(openPass = null) }
+        val claims = card.claims
+        val score = PassScore.combined(
+            claims = PassScore.claimScore(
+                chosen = chosen,
+                said = claims.indices.filter { claims[it].said }.toSet(),
+                total = claims.size,
+            ),
+            order = HintOrder.score(order),
+        )
+        viewModelScope.launch {
+            chapterRecallRepository.answer(
+                card = card,
+                score = score,
+                rating = PassScore.rating(score),
+                context = ReviewContext.REVISIT,
+            )
+        }
+    }
+
     /**
      * Throws the question away as a bad one, keeping a copy of it so the prompt can be tuned.
      *
@@ -797,6 +965,15 @@ class ReaderViewModel(
 
 /** How much open/read time to accumulate before writing it to disk. */
 private const val FLUSH_EVERY_MS = 30_000L
+
+/** Enough already-sent quotation to build a chapter pass from without uploading the chapter again. */
+private const val MIN_QUOTED_CHARS = 2_500
+
+/** A cap on what one chapter can cost when its own text does have to be sent. */
+private const val MAX_CHAPTER_CHARS = 14_000
+
+/** Between quotes that were sent separately, so the model does not read them as one sentence. */
+private const val SUBMITTED_SEPARATOR = "\n\n"
 
 /** Start writing the question this far into the stretch, so it is ready before it is wanted. */
 private const val PREPARE_FRACTION = 0.75

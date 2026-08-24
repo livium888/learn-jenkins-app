@@ -20,29 +20,39 @@ package com.flashcardreader.app.reader
 internal data class ReaderOverlays(
     val showFlashcard: Boolean,
     val showReadingCheck: Boolean,
+    val showChapterPass: Boolean,
     val inMultiWindow: Boolean,
 ) {
     /** True when nothing should be earning reading credit right now. */
     val coversText: Boolean
-        get() = showFlashcard || showReadingCheck || inMultiWindow
+        get() = showFlashcard || showReadingCheck || showChapterPass || inMultiWindow
 }
 
 /**
  * Works out what should be on screen, in the order the reader prioritises them: a due flashcard
- * first, then a question about the passage just read.
+ * first, then a question about the passage just read, then the pass over a chapter just finished.
+ *
+ * The chapter pass comes last deliberately. It is only ever offered once the session has ended -
+ * the delay is what makes the recall step worth anything - so it can never be competing with a
+ * question about a passage still being read.
  */
 internal fun readerOverlays(
     pendingFlashcards: Int,
     pendingChecks: Int,
     checkDue: Boolean,
+    // Defaulted so every existing call and test reads unchanged: the pass is an addition, not a
+    // change to what was already decided here.
+    chapterPassReady: Boolean = false,
     inMultiWindow: Boolean,
 ): ReaderOverlays {
     val showFlashcard = pendingFlashcards > 0
     // Prepared but not yet due is not shown - and so must not stop the reading that makes it due.
     val showReadingCheck = !showFlashcard && pendingChecks > 0 && checkDue
+    val showChapterPass = !showFlashcard && !showReadingCheck && chapterPassReady
     return ReaderOverlays(
         showFlashcard = showFlashcard,
         showReadingCheck = showReadingCheck,
+        showChapterPass = showChapterPass,
         inMultiWindow = inMultiWindow,
     )
 }

@@ -1,6 +1,7 @@
 package com.flashcardreader.app.reader
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -350,5 +351,62 @@ class VerifiedTimeIsRealTimeTest {
         }
         assertTrue("re-reading is still reading", laterVerified > 0)
         assertEquals("but it must never pay twice", 0L, laterPayable)
+    }
+}
+
+/**
+ * Chapter completion is measured from what was *read*, not from what was paid for. These pin down
+ * why those cannot be the same set.
+ */
+class ReadIsNotTheSameAsPaidTest {
+
+    private val idle = 600_000L
+
+    /** Reads one page long enough to clear the dwell floor at [capWpm]. */
+    private fun read(tracker: ReadingCreditTracker, page: Int, words: Int, startMs: Long): Long {
+        tracker.noteInteraction(startMs)
+        var now = startMs
+        repeat(words / 4) {
+            now += 1_000
+            tracker.tick(now, page, words, 1_000)
+        }
+        return now
+    }
+
+    @Test
+    fun `re-reading a paid-for page is still reading`() {
+        // This is the case that matters. Text paid for in an earlier session can never be paid for
+        // again - but a chapter you come back to and read properly has still been read, and must
+        // count towards finishing it. Keying completion off the paid record would miss that.
+        val first = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        read(first, page = 0, words = 200, startMs = 10_000)
+        assertTrue("reading a page records it as read", first.readChunks.isNotEmpty())
+        val paid = first.creditedChunks.toSet()
+        assertTrue("and pays for it", paid.isNotEmpty())
+
+        val later = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        later.restore(previouslyCredited = paid)
+        read(later, page = 0, words = 200, startMs = 10_000)
+
+        assertTrue("re-reading is reading", later.readChunks.isNotEmpty())
+        assertEquals("but it never pays twice", paid, later.creditedChunks)
+    }
+
+    @Test
+    fun `the read set survives a restore, so a chapter spanning two sittings still completes`() {
+        val first = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        read(first, page = 0, words = 200, startMs = 10_000)
+        assertTrue(first.readChunks.isNotEmpty())
+
+        val second = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        second.restore(previouslyCredited = emptySet(), previouslyRead = first.readChunks)
+        assertEquals(first.readChunks, second.readChunks)
+    }
+
+    @Test
+    fun `a page that was never read is in neither set`() {
+        val tracker = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        read(tracker, page = 0, words = 200, startMs = 10_000)
+        assertFalse("page 5 was never opened", tracker.readChunks.contains(5))
     }
 }

@@ -116,16 +116,10 @@ class LibraryRepository(
         // too - otherwise tidying a book would hand it back unpaid and it could be earned twice.
         val paid = readCreditedChunks(source)
         if (paid.isNotEmpty()) {
-            val moved = HashSet<Int>()
-            for (bucket in paid) {
-                val from = tidied.offsets.map(bucket * ReadingCreditTracker.CREDIT_BUCKET_CHARS)
-                val to = tidied.offsets.map((bucket + 1) * ReadingCreditTracker.CREDIT_BUCKET_CHARS - 1)
-                for (b in (from / ReadingCreditTracker.CREDIT_BUCKET_CHARS)..(to / ReadingCreditTracker.CREDIT_BUCKET_CHARS)) {
-                    moved.add(b)
-                }
-            }
-            saveCreditedChunks(source, moved)
+            saveCreditedChunks(source, moveBuckets(paid, tidied.offsets))
         }
+        val alreadyRead = readReadChunks(source)
+        if (alreadyRead.isNotEmpty()) saveReadChunks(source, moveBuckets(alreadyRead, tidied.offsets))
 
         // The page breaks describe text that no longer exists, so they go and are worked out again.
         pageCacheFile(source).delete()
@@ -166,22 +160,61 @@ class LibraryRepository(
      * table of contents and bookmarks.
      */
     suspend fun readCreditedChunks(source: Source): Set<Int> = withContext(Dispatchers.IO) {
-        val file = creditedFile(source)
-        if (!file.exists()) return@withContext emptySet()
-        runCatching {
+        readBuckets(creditedFile(source))
+    }
+
+    suspend fun saveCreditedChunks(source: Source, credited: Set<Int>) = withContext(Dispatchers.IO) {
+        writeBuckets(creditedFile(source), credited)
+    }
+
+    /**
+     * Stretches of this book that were genuinely read, whether or not they earned anything.
+     *
+     * Kept apart from the paid record because the two genuinely differ: Focus Gate's token bucket
+     * rate-limits payout, so a long uninterrupted sitting reads far more than it can be paid for.
+     * Anything asking "has this chapter been read" has to use this, or a chapter read carefully in
+     * one go would never count as finished.
+     */
+    suspend fun readReadChunks(source: Source): Set<Int> = withContext(Dispatchers.IO) {
+        readBuckets(readFile(source))
+    }
+
+    suspend fun saveReadChunks(source: Source, read: Set<Int>) = withContext(Dispatchers.IO) {
+        writeBuckets(readFile(source), read)
+    }
+
+    /**
+     * Re-keys character buckets after the book's text has been tidied.
+     *
+     * Buckets are positions in the text, so removing blank runs moves them. Both the paid record
+     * and the read record have to follow, or tidying a book would hand it back unread and unpaid.
+     */
+    private fun moveBuckets(buckets: Set<Int>, offsets: com.flashcardreader.app.data.parser.OffsetMap): Set<Int> {
+        val size = ReadingCreditTracker.CREDIT_BUCKET_CHARS
+        val moved = HashSet<Int>()
+        for (bucket in buckets) {
+            val from = offsets.map(bucket * size)
+            val to = offsets.map((bucket + 1) * size - 1)
+            for (b in (from / size)..(to / size)) moved.add(b)
+        }
+        return moved
+    }
+
+    private fun readBuckets(file: File): Set<Int> {
+        if (!file.exists()) return emptySet()
+        return runCatching {
             val arr = JSONArray(file.readText())
             (0 until arr.length()).map { arr.getInt(it) }.toSet()
         }.getOrDefault(emptySet())
     }
 
-    suspend fun saveCreditedChunks(source: Source, credited: Set<Int>) = withContext(Dispatchers.IO) {
-        val file = creditedFile(source)
-        if (credited.isEmpty()) {
+    private fun writeBuckets(file: File, buckets: Set<Int>) {
+        if (buckets.isEmpty()) {
             file.delete()
-            return@withContext
+            return
         }
         val arr = JSONArray()
-        for (i in credited.sorted()) arr.put(i)
+        for (i in buckets.sorted()) arr.put(i)
         file.writeText(arr.toString())
     }
 
@@ -191,6 +224,7 @@ class LibraryRepository(
         tocFile(source).delete()
         bookmarksFile(source).delete()
         creditedFile(source).delete()
+        readFile(source).delete()
         legacyCreditedFile(source).delete()
         sourceDao.delete(source.id)
     }
@@ -213,6 +247,10 @@ class LibraryRepository(
      */
     private fun creditedFile(source: Source): File =
         File("${source.textFilePath.removeSuffix(".txt")}.paid.json")
+
+    /** Where the read-but-not-necessarily-paid record lives. Same bucket keying as the paid one. */
+    private fun readFile(source: Source): File =
+        File(source.textFilePath.removeSuffix(".txt") + ".read.json")
 
     /** The page-index-keyed file this replaced. Only still referenced so deleting a book removes it. */
     private fun legacyCreditedFile(source: Source): File =

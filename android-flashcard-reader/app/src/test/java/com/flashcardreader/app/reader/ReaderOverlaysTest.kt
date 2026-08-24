@@ -71,4 +71,41 @@ class ReaderOverlaysTest {
         assertFalse(overlays.showFlashcard)
         assertFalse(overlays.showReadingCheck)
     }
+
+    @Test
+    fun `a chapter pass covers the text and stops accrual`() {
+        val overlays = readerOverlays(0, 0, checkDue = false, chapterPassReady = true, inMultiWindow = false)
+        assertTrue(overlays.showChapterPass)
+        assertTrue(overlays.coversText)
+    }
+
+    @Test
+    fun `a chapter pass never competes with a question or a card`() {
+        val behindCheck = readerOverlays(
+            pendingFlashcards = 0,
+            pendingChecks = 1,
+            checkDue = true,
+            chapterPassReady = true,
+            inMultiWindow = false,
+        )
+        assertTrue(behindCheck.showReadingCheck)
+        assertFalse("only one prompt at a time", behindCheck.showChapterPass)
+
+        val behindCard = readerOverlays(
+            pendingFlashcards = 1,
+            pendingChecks = 0,
+            checkDue = false,
+            chapterPassReady = true,
+            inMultiWindow = false,
+        )
+        assertTrue(behindCard.showFlashcard)
+        assertFalse(behindCard.showChapterPass)
+    }
+
+    @Test
+    fun `no pass means nothing changes`() {
+        val overlays = readerOverlays(0, 0, checkDue = false, chapterPassReady = false, inMultiWindow = false)
+        assertFalse(overlays.showChapterPass)
+        assertFalse(overlays.coversText)
+    }
 }

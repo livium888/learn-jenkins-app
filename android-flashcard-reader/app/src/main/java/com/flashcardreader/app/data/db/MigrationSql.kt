@@ -98,6 +98,39 @@ object MigrationSql {
         "ALTER TABLE terms ADD COLUMN distractors TEXT NOT NULL DEFAULT ''",
     )
 
+    /**
+     * v8 adds the chapter pass: what a chapter claimed, and the order it claimed it in.
+     *
+     * A CREATE TABLE, so nothing that already exists is touched and no saved card can be disturbed
+     * by the upgrade. The index name and the hyperMiss default are both written here and declared
+     * identically on the entity - SchemaGuardTest fails the build if they ever drift, which is the
+     * mistake that crash-looped v5.
+     */
+    val SQL_7_8 = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS chapter_recalls (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            sourceId INTEGER NOT NULL,
+            chapterIndex INTEGER NOT NULL,
+            chapterTitle TEXT NOT NULL,
+            startChar INTEGER NOT NULL,
+            endChar INTEGER NOT NULL,
+            propositions TEXT NOT NULL,
+            hints TEXT NOT NULL,
+            createdAt INTEGER NOT NULL,
+            difficulty REAL NOT NULL,
+            stability REAL NOT NULL,
+            due INTEGER,
+            lastReviewedAt INTEGER,
+            reps INTEGER NOT NULL,
+            lapses INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            hyperMiss INTEGER NOT NULL DEFAULT 0
+        )
+        """.trimIndent(),
+        "CREATE INDEX IF NOT EXISTS index_chapter_recalls_source ON chapter_recalls (sourceId, chapterIndex)",
+    )
+
     /** Every migration, keyed by the version it upgrades from. */
     val BY_FROM_VERSION: Map<Int, List<String>> = mapOf(
         1 to SQL_1_2,
@@ -106,8 +139,9 @@ object MigrationSql {
         4 to SQL_4_5,
         5 to SQL_5_6,
         6 to SQL_6_7,
+        7 to SQL_7_8,
     )
 
     /** The version [BY_FROM_VERSION] can carry a database up to. Must equal the @Database version. */
-    val LATEST_VERSION = 7
+    val LATEST_VERSION = 8
 }

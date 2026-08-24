@@ -92,12 +92,23 @@ class ReadingCreditTracker(
 
     /** Pages that began earning this session, so their time keeps counting while they are read. */
     private val payableThisSession = HashSet<Int>()
+
+    /**
+     * Every stretch of text genuinely read, across all sessions.
+     *
+     * Deliberately separate from [credited]. Payout is rate-limited by the token bucket, so text
+     * read faster than the cap allows is read but never paid for - and anything that asks "did you
+     * read this chapter" must use this set, or a chapter read in one long sitting would never
+     * count as finished.
+     */
+    private val readBuckets = HashSet<Int>()
     private var lastInteractionAt = 0L
     private var bucketWords = 0f
 
     /** Stretches already paid for in an earlier session, loaded from the book's sidecar. */
-    fun restore(previouslyCredited: Set<Int>) {
+    fun restore(previouslyCredited: Set<Int>, previouslyRead: Set<Int> = emptySet()) {
         credited.addAll(previouslyCredited)
+        readBuckets.addAll(previouslyRead)
     }
 
     /**
@@ -113,6 +124,9 @@ class ReadingCreditTracker(
     }
 
     val creditedChunks: Set<Int> get() = credited
+
+    /** Stretches of text that were genuinely read, paid for or not. See [readBuckets]. */
+    val readChunks: Set<Int> get() = readBuckets
 
     /** The buckets of book text a page covers. */
     private fun bucketsFor(index: Int): IntRange {
@@ -172,6 +186,7 @@ class ReadingCreditTracker(
 
         // Paying out is the part that stays once-ever, and the part the rate cap governs.
         val buckets = bucketsFor(focusedChunk)
+        if (firstReadThisSession) readBuckets.addAll(buckets)
         val alreadyPaid = buckets.all { it in credited }
         var creditedChunk: Int? = null
         if (!alreadyPaid && bucketWords >= wordCount) {

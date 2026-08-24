@@ -114,6 +114,74 @@ object GeminiTutor {
     }
 
     /**
+     * Writes the pass for a chapter that has just been finished: what it claimed, and the order it
+     * claimed it in.
+     *
+     * [chapterText] should be as much of the chapter as is worth sending - preferably the sentences
+     * already quoted back from earlier questions, which have been sent once already, rather than a
+     * fresh upload of the whole thing.
+     *
+     * The order the model returns is not taken on trust. Every hint carries a sentence copied from
+     * the chapter, and ChapterRecall.parse checks that those sentences really occur, in the claimed
+     * order, far enough apart to be separate steps. A model that invents its structure fails that
+     * check and the batch is thrown away.
+     */
+    suspend fun generateChapterRecall(
+        context: Context,
+        chapterTitle: String,
+        chapterText: String,
+    ): Result<ChapterRecall> = withContext(Dispatchers.IO) {
+        val prefs = AiPrefs(context)
+        val key = prefs.apiKey
+        if (key.isBlank()) {
+            return@withContext Result.failure(IllegalStateException("Add your Gemini API key in AI tutor settings first."))
+        }
+        val trimmed = chapterText.trim()
+        if (trimmed.length < MIN_CHAPTER_CHARS) {
+            return@withContext Result.failure(
+                IllegalStateException("Not enough of this chapter was read to make a pass over it."),
+            )
+        }
+
+        val prompt = buildString {
+            appendLine("Someone has just finished reading a chapter and is about to be asked what")
+            appendLine("stayed with them. Write two things about it.")
+            appendLine()
+            appendLine("FIRST: ${ChapterRecall.MIN_PROPOSITIONS} to ${ChapterRecall.MAX_PROPOSITIONS} short claims about the chapter.")
+            appendLine("- Some must be things the chapter really says. For each of those, quote the")
+            appendLine("  sentence it comes from, copied EXACTLY from the text, character for character.")
+            appendLine("- The rest must be things the chapter does NOT say: plausible to someone who")
+            appendLine("  skimmed, and clearly wrong to someone who read it. Contradict the chapter, or")
+            appendLine("  state something it carefully avoids saying. Leave their evidence empty.")
+            appendLine("- At least ${ChapterRecall.MIN_OF_EACH_KIND} of each kind, and never all of one kind.")
+            appendLine("- Never write a false claim by copying a true sentence and negating one word;")
+            appendLine("  make it wrong in substance, not in grammar.")
+            appendLine()
+            appendLine("SECOND: ${ChapterRecall.MIN_HINTS} to ${ChapterRecall.MAX_HINTS} hints, one per step in the chapter's argument,")
+            appendLine("IN THE ORDER THE CHAPTER MAKES THEM.")
+            appendLine("- A hint is a few words - just enough to recognise the step, not to replace it.")
+            appendLine("- With each hint, give an anchor: a sentence from that part of the chapter,")
+            appendLine("  copied EXACTLY. The anchors must be spread across the whole chapter, not")
+            appendLine("  clustered in one passage, and must appear in the same order as the hints.")
+            appendLine("- Write in ${prefs.myLanguage}.")
+            appendLine()
+            appendLine("Reply with JSON only, no other text, in exactly this shape:")
+            appendLine("""{"propositions":[{"text":"...","said":true,"evidence":"..."}],"hints":[{"hint":"...","anchor":"..."}]}""")
+            appendLine()
+            appendLine("CHAPTER: $chapterTitle")
+            appendLine(trimmed)
+        }
+
+        askWithWorkingModel(prefs, key, prompt, CHAPTER_RECALL_SCHEMA).mapCatching { reply ->
+            ChapterRecall.parse(reply, trimmed)
+                ?: error(
+                    "The AI answered, but the pass didn't check out - a quote that isn't in the " +
+                        "chapter, steps out of order, or too few of them.",
+                )
+        }
+    }
+
+    /**
      * How many questions to allow for a passage of this length.
      *
      * One per [WORDS_PER_QUESTION] words, capped. The cap is the important half: this is an
@@ -276,6 +344,12 @@ object GeminiTutor {
     private const val MIN_PASSAGE_CHARS = 400
 
     /**
+     * Below this there is no chapter to have an argument. Short front-matter sections - a
+     * dedication, a one-page preface - are chapters in a table of contents and are not worth a pass.
+     */
+    private const val MIN_CHAPTER_CHARS = 2_000
+
+    /**
      * Reading per question allowed.
      *
      * Set so the default four-minute stretch (about 960 words at the tracker's assumed pace) comes
@@ -329,6 +403,39 @@ object GeminiTutor {
                 // Only the questions are required: a passage of entirely ordinary words should
                 // come back with none rather than three invented ones.
                 .put("required", JSONArray().put("questions"))
+        }
+
+    private val CHAPTER_RECALL_SCHEMA: JSONObject
+        get() {
+            val proposition = JSONObject()
+                .put("type", "OBJECT")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("text", JSONObject().put("type", "STRING"))
+                        .put("said", JSONObject().put("type", "BOOLEAN"))
+                        .put("evidence", JSONObject().put("type", "STRING")),
+                )
+                .put("required", JSONArray().put("text").put("said"))
+            val hint = JSONObject()
+                .put("type", "OBJECT")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("hint", JSONObject().put("type", "STRING"))
+                        .put("anchor", JSONObject().put("type", "STRING")),
+                )
+                .put("required", JSONArray().put("hint").put("anchor"))
+            return JSONObject()
+                .put("type", "OBJECT")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("propositions", JSONObject().put("type", "ARRAY").put("items", proposition))
+                        .put("hints", JSONObject().put("type", "ARRAY").put("items", hint)),
+                )
+                // Both halves are required: a pass with only one of them is not a pass.
+                .put("required", JSONArray().put("propositions").put("hints"))
         }
 
     private fun parseAnswer(payload: String): String {

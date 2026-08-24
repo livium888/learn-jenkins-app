@@ -31,7 +31,10 @@ class ReviewReminderWorker(
         val words = db.termDao().getDue(now).size
         // Comprehension questions are cards on the same schedule, and were being left out - so a
         // day with nothing but questions due looked to the reminder like a day with nothing due.
-        val questions = runCatching { db.readingCheckDao().dueCount(now) }.getOrDefault(0)
+        val questions = runCatching { db.readingCheckDao().dueCount(now) }.getOrDefault(0) +
+            // Chapter passes are cards on the same schedule too, and counted alongside the
+            // questions rather than as a third category - the reminder is a nudge, not a report.
+            runCatching { db.chapterRecallDao().dueCount(now) }.getOrDefault(0)
         if (words + questions > 0) notifyDue(applicationContext, words, questions)
         return Result.success()
     }

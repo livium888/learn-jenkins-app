@@ -8,12 +8,14 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.flashcardreader.app.data.db.dao.ChapterRecallDao
 import com.flashcardreader.app.data.db.dao.OccurrenceDao
 import com.flashcardreader.app.data.db.dao.ReadingCheckDao
 import com.flashcardreader.app.data.db.dao.ReviewLogDao
 import com.flashcardreader.app.data.db.dao.SourceDao
 import com.flashcardreader.app.data.db.dao.TermDao
 import com.flashcardreader.app.data.db.entities.CardState
+import com.flashcardreader.app.data.db.entities.ChapterRecallCard
 import com.flashcardreader.app.data.db.entities.Occurrence
 import com.flashcardreader.app.data.db.entities.CardKind
 import com.flashcardreader.app.data.db.entities.ReadingCheckCard
@@ -59,8 +61,9 @@ class Converters {
         Occurrence::class,
         ReadingCheckCard::class,
         ReviewLog::class,
+        ChapterRecallCard::class,
     ],
-    version = 7,
+    version = 8,
     // Exported so SchemaGuardTest can compare what Room expects against MigrationSql.
     exportSchema = true,
 )
@@ -71,6 +74,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun occurrenceDao(): OccurrenceDao
     abstract fun readingCheckDao(): ReadingCheckDao
     abstract fun reviewLogDao(): ReviewLogDao
+    abstract fun chapterRecallDao(): ChapterRecallDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null

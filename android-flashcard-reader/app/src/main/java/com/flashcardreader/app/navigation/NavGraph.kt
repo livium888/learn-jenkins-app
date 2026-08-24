@@ -44,7 +44,7 @@ fun AppNavGraph(app: FlashcardReaderApp) {
     NavHost(navController = navController, startDestination = ROUTE_LIBRARY) {
         composable(ROUTE_LIBRARY) {
             val viewModel: LibraryViewModel = viewModel(
-                factory = viewModelFactory { initializer { LibraryViewModel(app.libraryRepository, app.readingCheckRepository) } },
+                factory = viewModelFactory { initializer { LibraryViewModel(app.libraryRepository, app.readingCheckRepository, app.chapterRecallRepository) } },
             )
             LibraryScreen(
                 viewModel = viewModel,
@@ -123,6 +123,7 @@ fun AppNavGraph(app: FlashcardReaderApp) {
                             app.libraryRepository,
                             app.termRepository,
                             app.readingCheckRepository,
+                            app.chapterRecallRepository,
                             app.readingLog,
                             app.readerPrefs,
                             app.focusPrefs,

@@ -231,6 +231,16 @@ fun ReaderScreen(
         },
         bottomBar = {
             if (!state.loading) {
+                // A finished chapter is announced, never forced. Sitting above the progress bar it
+                // is out of the way of the text, and reading carries on accruing behind it - only
+                // an *open* pass covers the page (see readerOverlays).
+                state.pendingPass?.let { pass ->
+                    ChapterPassBanner(
+                        title = pass.chapterTitle,
+                        onOpen = viewModel::openChapterPass,
+                        onDismiss = viewModel::dismissChapterPass,
+                    )
+                }
                 ReaderProgressBar(
                     pageIndex = pagerState.currentPage,
                     pageCount = state.chunks.size,
@@ -302,6 +312,7 @@ fun ReaderScreen(
                             pendingFlashcards = live.pendingFlashcards.size,
                             pendingChecks = live.pendingChecks.size,
                             checkDue = live.checkDue,
+                            chapterPassReady = live.openPass != null,
                             inMultiWindow = activity?.isInMultiWindowMode == true,
                         )
                         // No centre-of-viewport guess any more: the page being settled on is the
@@ -420,6 +431,7 @@ fun ReaderScreen(
         pendingFlashcards = state.pendingFlashcards.size,
         pendingChecks = state.pendingChecks.size,
         checkDue = state.checkDue,
+        chapterPassReady = state.openPass != null,
         // Only about what is drawn here; split-screen changes nothing on screen.
         inMultiWindow = false,
     )
@@ -444,6 +456,14 @@ fun ReaderScreen(
             // Only labelled when there is more than one, so a single question stays unadorned.
             position = if (state.pendingChecks.size > 1) state.checkIndex + 1 else null,
             total = state.pendingChecks.size,
+        )
+    }
+
+    state.openPass?.takeIf { overlays.showChapterPass }?.let { pass ->
+        ChapterRecallDialog(
+            card = pass,
+            onAnswered = viewModel::answerChapterPass,
+            onDismiss = viewModel::dismissChapterPass,
         )
     }
 

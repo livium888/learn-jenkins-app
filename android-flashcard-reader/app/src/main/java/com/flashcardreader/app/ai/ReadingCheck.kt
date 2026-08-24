@@ -113,6 +113,20 @@ data class ReadingCheck(
             return normalize(passage).contains(needle)
         }
 
+        /**
+         * Where the quoted text occurs, as an index into the normalised passage, or -1.
+         *
+         * Only the *relative* order of two quotes is ever asked of this, which is why an index into
+         * the normalised text is enough: collapsing whitespace shifts every offset but preserves
+         * their order. It is what lets the chapter pass check a claimed order against the book
+         * itself rather than trusting the model's word for it.
+         */
+        fun positionIn(quote: String, passage: String): Int {
+            val needle = normalize(quote)
+            if (needle.length < MIN_EVIDENCE_CHARS) return -1
+            return normalize(passage).indexOf(needle)
+        }
+
         private const val MIN_EVIDENCE_CHARS = 20
 
         private fun normalize(text: String): String = text

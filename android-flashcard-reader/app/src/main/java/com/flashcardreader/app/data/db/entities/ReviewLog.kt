@@ -6,7 +6,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /** Which kind of card a review belonged to, so the two can be fitted together or apart. */
-enum class CardKind { TERM, READING_CHECK }
+enum class CardKind { TERM, READING_CHECK, CHAPTER_RECALL }
 
 /**
  * Where an answer was given, which is what separates understanding something from retaining it.
