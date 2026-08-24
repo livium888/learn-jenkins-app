@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -28,10 +29,11 @@ import com.flashcardreader.app.ai.AiPrefs
 import com.flashcardreader.app.theme.ReaderFont
 import com.flashcardreader.app.theme.ReaderPalette
 import com.flashcardreader.app.theme.ReaderTypography
+import com.flashcardreader.app.theme.colorsFor
 import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.PrimaryButton
 
-/** Typography/theme controls - font, size, line height, light/sepia/dark. */
+/** Typography/theme controls - font, size, line height, and the page and night themes. */
 @Composable
 fun ReaderSettingsSheet(
     typography: ReaderTypography,
@@ -149,19 +151,12 @@ fun ReaderSettingsSheet(
             onCommit = { onChange(typography.copy(lineHeightMultiplier = it)) },
         )
 
-        Label("Theme")
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-        ) {
-            ReaderPalette.values().forEach { palette ->
-                FilterChip(
-                    selected = typography.palette == palette,
-                    onClick = { onChange(typography.copy(palette = palette)) },
-                    label = { Text(palette.name.lowercase().replaceFirstChar(Char::uppercase)) },
-                )
-            }
-        }
+        // Split light from dark rather than one long scroller: the choice you are making is
+        // almost always "a page for this room", and the two groups are that question's two answers.
+        Label("Page")
+        ThemeRow(ReaderPalette.values().filterNot { it.isDark }, typography, onChange)
+        Label("Night")
+        ThemeRow(ReaderPalette.values().filter { it.isDark }, typography, onChange)
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -228,6 +223,45 @@ fun ReaderSettingsSheet(
         }
 
         PrimaryButton(text = "Done", onClick = onDismiss)
+    }
+}
+
+@Composable
+/** One row of theme chips, each drawn in the colours it would actually give the page. */
+@Composable
+private fun ThemeRow(
+    palettes: List<ReaderPalette>,
+    typography: ReaderTypography,
+    onChange: (ReaderTypography) -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+    ) {
+        palettes.forEach { palette ->
+            val colors = colorsFor(palette)
+            FilterChip(
+                selected = typography.palette == palette,
+                onClick = { onChange(typography.copy(palette = palette)) },
+                label = { Text(palette.label) },
+                // Showing each theme in its own colours means the choice is made by looking rather
+                // than by reading a list of names and trying them one at a time.
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = colors.background,
+                    labelColor = colors.text,
+                    selectedContainerColor = colors.background,
+                    selectedLabelColor = colors.text,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = typography.palette == palette,
+                    borderColor = colors.text.copy(alpha = 0.25f),
+                    selectedBorderColor = colors.accent,
+                    borderWidth = 1.dp,
+                    selectedBorderWidth = 2.dp,
+                ),
+            )
+        }
     }
 }
 

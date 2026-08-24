@@ -6,15 +6,54 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
-enum class ReaderPalette { LIGHT, SEPIA, DARK }
+/**
+ * A reading theme.
+ *
+ * The names of the constants are what gets written to storage, so they never change - the [label]
+ * is what a reader sees, which is why LIGHT reads as "Paper" and DARK as "Night".
+ *
+ * The palettes follow the conventions e-readers have settled on rather than inventing new ones:
+ * paper-white, sepia, and warm and cool dark modes. None of them is copied from another app's
+ * files - they are chosen here to hit the same character, because these looks work for reasons
+ * that have nothing to do with branding. A dark theme's text is deliberately never pure white:
+ * full-contrast white on black blooms at night and is harder to read, not easier.
+ */
+enum class ReaderPalette(val label: String, val isDark: Boolean) {
+    LIGHT("Paper", false),
+    SEPIA("Sepia", false),
+    PARCHMENT("Parchment", false),
+    GREY("Grey", false),
+    CANDLE("Candle", true),
+    COBALT("Cobalt", true),
+    SLATE("Slate", true),
+    DARK("Night", true),
+    BLACK("Black", true),
+}
 
 @Immutable
 data class ReaderColors(val background: Color, val text: Color, val accent: Color)
 
 fun colorsFor(palette: ReaderPalette): ReaderColors = when (palette) {
+    // Paper: plain white, near-black rather than black - true black on white is harsher than it
+    // looks on a backlit screen.
     ReaderPalette.LIGHT -> ReaderColors(Color(0xFFFFFFFF), Color(0xFF1A1A1A), Color(0xFF3B82F6))
+    // Sepia: the classic warm page.
     ReaderPalette.SEPIA -> ReaderColors(Color(0xFFF4ECD8), Color(0xFF4B3A26), Color(0xFF8C6D46))
+    // Parchment: creamier and lower-contrast than sepia, for bright rooms.
+    ReaderPalette.PARCHMENT -> ReaderColors(Color(0xFFFAF3E3), Color(0xFF3F3529), Color(0xFF9C7B4E))
+    // Grey: a neutral, slightly dimmed page. Easier than white under harsh light.
+    ReaderPalette.GREY -> ReaderColors(Color(0xFFE9E7E2), Color(0xFF2C2C2C), Color(0xFF5C7CA8))
+    // Candle: a warm dark theme - amber text on near-black, the least blue light of any of them.
+    ReaderPalette.CANDLE -> ReaderColors(Color(0xFF15110B), Color(0xFFE9D3A6), Color(0xFFD9A441))
+    // Cobalt: a cool dark theme - deep navy rather than black, which many people find easier to
+    // settle into than a pure dark page.
+    ReaderPalette.COBALT -> ReaderColors(Color(0xFF0E1826), Color(0xFFC9D8EA), Color(0xFF5794E0))
+    // Slate: neutral dark, no colour cast either way.
+    ReaderPalette.SLATE -> ReaderColors(Color(0xFF21252B), Color(0xFFD5DAE0), Color(0xFF8FAAD0))
+    // Night: the original near-black.
     ReaderPalette.DARK -> ReaderColors(Color(0xFF121212), Color(0xFFE6E1DA), Color(0xFF7FB2F0))
+    // Black: true black, so an OLED screen switches those pixels off entirely.
+    ReaderPalette.BLACK -> ReaderColors(Color(0xFF000000), Color(0xFFBFBFBF), Color(0xFF6FA8DC))
 }
 
 /**

@@ -67,6 +67,10 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineBreak
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -107,7 +111,11 @@ private val CHAPTER_HEADING_HEIGHT = 120.dp
 /** What the add/edit-flashcard dialog is currently prefilled with, or null if closed. */
 private data class FlashcardPrefill(val term: String, val definition: String, val contextSentence: String = "")
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalFoundationApi::class,
+    androidx.compose.ui.text.ExperimentalTextApi::class,
+)
 @Composable
 fun ReaderScreen(
     viewModel: ReaderViewModel,
@@ -274,6 +282,9 @@ fun ReaderScreen(
             return@Scaffold
         }
 
+        // One TextStyle for measuring and for drawing. Anything set here that affects where the
+        // lines fall must also appear in the pagination signature below, or the cached page breaks
+        // would describe a layout that is no longer being drawn.
         val style = TextStyle(
             fontFamily = fontFamily,
             fontSize = typography.fontSize,
@@ -281,6 +292,21 @@ fun ReaderScreen(
             letterSpacing = typography.letterSpacing,
             color = colors.text,
             textAlign = if (typography.justify) TextAlign.Justify else TextAlign.Start,
+            // Justified text without hyphenation is what produces the rivers of white space that
+            // make a page look wrong: with nowhere to break a long word, the line's remaining
+            // spaces have to stretch to fill the measure. Every printed book hyphenates; this is
+            // the single change that most makes justified text look typeset rather than stretched.
+            hyphens = Hyphens.Auto,
+            // Break lines by looking at the paragraph as a whole rather than greedily line by line.
+            // Slower, and worth it on a page of prose - it is what avoids a very short last line.
+            lineBreak = LineBreak.Paragraph,
+            // Font padding is a legacy Android quirk that adds uneven space above the first line
+            // and below the last. Off, the line spacing you asked for is the spacing you get.
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+            lineHeightStyle = LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Center,
+                trim = LineHeightStyle.Trim.None,
+            ),
         )
 
         // Report the page on screen. Exactly one page is visible, so "what is being read" stops
@@ -354,7 +380,9 @@ fun ReaderScreen(
             // Everything that changes where the lines fall. A mismatch is only a cache miss, so
             // being over-inclusive here costs a re-layout and being under-inclusive shows wrong pages.
             val signature = listOf(
-                "v1", pageWidthPx, pageHeightPx.toInt(), typography.font.name,
+                // v2: hyphenation and paragraph-wide line breaking change where lines fall, so
+                // every cached layout from before them is wrong and must be measured again.
+                "v2", pageWidthPx, pageHeightPx.toInt(), typography.font.name,
                 typography.fontSize.value, typography.lineHeight.value,
                 typography.letterSpacing.value, typography.justify,
                 typography.horizontalMarginDp, state.fullText.length,
