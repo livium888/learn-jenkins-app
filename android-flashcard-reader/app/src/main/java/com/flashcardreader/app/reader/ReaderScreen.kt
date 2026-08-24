@@ -89,6 +89,7 @@ import com.flashcardreader.app.theme.FontLoader
 import com.flashcardreader.app.theme.LoadedFont
 import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.PrimaryButton
+import com.flashcardreader.app.theme.ComfortLight
 import com.flashcardreader.app.theme.ReaderColors
 import com.flashcardreader.app.theme.colorsFor
 import kotlinx.coroutines.delay
@@ -213,6 +214,28 @@ fun ReaderScreen(
         }
     }
 
+    // Re-read every minute rather than watched: the ramp moves over hours, and a clock that ticks
+    // in a reader is a wakeful thing in itself.
+    val minuteOfDay by produceState(initialValue = currentMinuteOfDay(), typography.autoWarmth) {
+        while (typography.autoWarmth) {
+            value = currentMinuteOfDay()
+            delay(WARMTH_TICK_MS)
+        }
+    }
+    val effectiveWarmth =
+        if (typography.autoWarmth) ComfortLight.warmthAt(minuteOfDay, typography.warmth)
+        else typography.warmth
+
+    // How far through the current chapter, which is the progress anyone actually feels. A book's
+    // percentage barely moves in a sitting; a chapter's fills up in one.
+    val chapterFraction = remember(state.currentCharOffset, state.chapters, state.fullText.length) {
+        val here = state.currentCharOffset
+        val starts = state.chapters.map { it.charOffset }.sorted()
+        val from = starts.lastOrNull { it <= here } ?: 0
+        val to = starts.firstOrNull { it > here } ?: state.fullText.length
+        if (to <= from) null else ((here - from).toFloat() / (to - from)).coerceIn(0f, 1f)
+    }
+
     // What is left to read, in time. The pace behind it is measured rather than guessed - see
     // ReadingPace - which is the whole reason this is worth showing at all.
     val timeLeft = remember(
@@ -235,6 +258,25 @@ fun ReaderScreen(
             val words = ReadingPace.wordsRemaining(end - here, state.charsPerWord)
             ReadingPace.label(ReadingPace.minutesFor(words, state.pace), horizon)
         }
+    }
+
+    // Volume keys turn pages while the reader is on screen, and are handed back on the way out so
+    // they go back to being volume keys everywhere else. Up goes back, down goes forward, matching
+    // the direction the text moves.
+    DisposableEffect(activity, state.chunks.size, typography.volumeKeysTurnPages) {
+        val host = activity as? com.flashcardreader.app.MainActivity
+        if (host != null && typography.volumeKeysTurnPages) {
+            host.onVolumeKey = { up ->
+                val last = (state.chunks.size - 1).coerceAtLeast(0)
+                val target =
+                    if (up) (pagerState.currentPage - 1).coerceAtLeast(0)
+                    else (pagerState.currentPage + 1).coerceAtMost(last)
+                viewModel.onReadingInteraction()
+                scope.launch { pagerState.animateScrollToPage(target) }
+                true
+            }
+        }
+        onDispose { host?.onVolumeKey = null }
     }
 
     /**
@@ -352,6 +394,7 @@ fun ReaderScreen(
                         scope.launch { pagerState.scrollToPage(page.coerceIn(0, (state.chunks.size - 1).coerceAtLeast(0))) }
                     },
                     timeLeft = timeLeft,
+                    chapterFraction = chapterFraction,
                 )
             }
         }
@@ -554,12 +597,14 @@ fun ReaderScreen(
                 )
             }
 
-            // Night warmth: a non-interactive warm overlay that cuts blue light.
-            if (typography.warmth > 0f) {
+            // Night warmth: a non-interactive warm overlay that cuts blue light. On a schedule when
+            // asked - a slider only warms the page for someone who remembers to move it, which is
+            // nobody at the hour it would help.
+            if (effectiveWarmth > 0f) {
                 Box(
                     Modifier
                         .matchParentSize()
-                        .background(Color(0xFFFF6A00).copy(alpha = (typography.warmth * 0.5f).coerceIn(0f, 0.5f))),
+                        .background(Color(0xFFFF6A00).copy(alpha = (effectiveWarmth * 0.5f).coerceIn(0f, 0.5f))),
                 )
             }
 
@@ -732,6 +777,8 @@ private fun ReaderProgressBar(
     onScrubToPage: (Int) -> Unit,
     /** "12 min left in this chapter", or null before there is anything to say. */
     timeLeft: String?,
+    /** How far through the current chapter, 0..1, or null in a book with no chapters. */
+    chapterFraction: Float?,
 ) {
     // Real pages now, not an estimate from a character count - so "page 40 of 312" is the book's
     // actual shape at this text size, and the scrubber lands on a page rather than near one.
@@ -751,14 +798,28 @@ private fun ReaderProgressBar(
                         tint = if (autoTurn) MaterialTheme.colorScheme.primary else muted,
                     )
                 }
-                Text(
-                    chapterTitle.orEmpty(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        chapterTitle.orEmpty(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // How far through this chapter. A book's percentage barely moves in a sitting;
+                    // a chapter's fills up in one, which is the progress a reader actually feels.
+                    if (chapterFraction != null) {
+                        LinearProgressIndicator(
+                            progress = { chapterFraction },
+                            color = onColor.copy(alpha = 0.55f),
+                            trackColor = onColor.copy(alpha = 0.12f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .padding(top = 2.dp),
+                        )
+                    }
+                }
                 if (focusEnabled) {
                     // The whole point of earning is being able to watch it happen, so the balance
                     // lives here, where the reading is - not buried in a settings screen.
@@ -1074,6 +1135,14 @@ private const val RELAYOUT_DEBOUNCE_MS = 250L
  * still the biggest target, because opening the menu by accident costs a tap and turning the page
  * by accident costs your place.
  */
+/** How often to re-read the clock for the comfort-light ramp. */
+private const val WARMTH_TICK_MS = 60_000L
+
+private fun currentMinuteOfDay(): Int {
+    val now = java.time.LocalTime.now()
+    return now.hour * 60 + now.minute
+}
+
 private const val TAP_BACK_EDGE = 0.28f
 private const val TAP_FORWARD_EDGE = 0.72f
 

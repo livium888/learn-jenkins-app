@@ -13,6 +13,36 @@ import com.flashcardreader.app.navigation.AppNavGraph
 import com.flashcardreader.app.theme.FlashcardReaderTheme
 
 class MainActivity : ComponentActivity() {
+
+    /**
+     * What to do with a volume key, set by the reader while it is on screen.
+     *
+     * Handled here rather than in Compose because volume keys are dispatched to the activity before
+     * any view sees them - a focusable composable would only receive them by accident of focus,
+     * which is exactly the kind of thing that works on one phone and not the next. Returning true
+     * swallows the key, so the volume does not change while a page turns.
+     */
+    var onVolumeKey: ((up: Boolean) -> Boolean)? = null
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val handler = onVolumeKey
+        if (handler != null && event.action == android.view.KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_VOLUME_UP -> if (handler(true)) return true
+                android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> if (handler(false)) return true
+            }
+        }
+        // The matching key-up must be swallowed too, or the system rings the volume panel anyway.
+        if (handler != null && event.action == android.view.KeyEvent.ACTION_UP) {
+            when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_VOLUME_UP,
+                android.view.KeyEvent.KEYCODE_VOLUME_DOWN,
+                -> return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // The system (or an aggressive OEM) can kill the Focus Gate watcher at any time. Opening

@@ -105,6 +105,16 @@ data class ReaderTypography(
     val warmth: Float = 0f,
     /** Extra letter spacing (in em); wider tracking measurably eases dyslexic reading. */
     val letterSpacingEm: Float = 0f,
+    /**
+     * Warm the page automatically in the evening, ramping up rather than switching on.
+     *
+     * [warmth] becomes the ceiling rather than the current strength when this is on - see
+     * ComfortLight. Off by default: a page that changes colour on its own is a surprise the first
+     * time, and it should be asked for.
+     */
+    val autoWarmth: Boolean = false,
+    /** Turn pages with the volume buttons, for reading one-handed or with the phone propped up. */
+    val volumeKeysTurnPages: Boolean = false,
 ) {
     val fontSize get() = fontSizeSp.sp
     val lineHeight get() = (fontSizeSp * lineHeightMultiplier).sp

@@ -23,6 +23,8 @@ class ReaderPrefs(private val context: Context) {
         val BRIGHTNESS = floatPreferencesKey("brightness")
         val WARMTH = floatPreferencesKey("warmth")
         val LETTER_SPACING = floatPreferencesKey("letter_spacing")
+        val AUTO_WARMTH = booleanPreferencesKey("auto_warmth")
+        val VOLUME_KEYS = booleanPreferencesKey("volume_keys")
     }
 
     val typography: Flow<ReaderTypography> = context.dataStore.data.map { prefs ->
@@ -36,6 +38,8 @@ class ReaderPrefs(private val context: Context) {
             brightness = prefs[Keys.BRIGHTNESS] ?: -1f,
             warmth = prefs[Keys.WARMTH] ?: 0f,
             letterSpacingEm = prefs[Keys.LETTER_SPACING] ?: 0f,
+            autoWarmth = prefs[Keys.AUTO_WARMTH] ?: false,
+            volumeKeysTurnPages = prefs[Keys.VOLUME_KEYS] ?: false,
         )
     }
 
@@ -50,6 +54,8 @@ class ReaderPrefs(private val context: Context) {
             prefs[Keys.BRIGHTNESS] = typography.brightness
             prefs[Keys.WARMTH] = typography.warmth
             prefs[Keys.LETTER_SPACING] = typography.letterSpacingEm
+            prefs[Keys.AUTO_WARMTH] = typography.autoWarmth
+            prefs[Keys.VOLUME_KEYS] = typography.volumeKeysTurnPages
         }
     }
 }

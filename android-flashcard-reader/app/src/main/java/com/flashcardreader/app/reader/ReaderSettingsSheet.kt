@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.flashcardreader.app.ai.AiPrefs
+import com.flashcardreader.app.theme.ComfortLight
 import com.flashcardreader.app.theme.ReaderFont
 import com.flashcardreader.app.theme.ReaderPalette
 import com.flashcardreader.app.theme.ReaderTypography
@@ -217,6 +218,46 @@ fun ReaderSettingsSheet(
             onValueChange = { onChange(typography.copy(warmth = it)) },
             valueRange = 0f..1f,
         )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Warm the page in the evening", style = MaterialTheme.typography.bodyLarge)
+            Switch(
+                checked = typography.autoWarmth,
+                onCheckedChange = { onChange(typography.copy(autoWarmth = it)) },
+            )
+        }
+        if (typography.autoWarmth) {
+            Text(
+                "Fades in from ${ComfortLight.DEFAULT_START_HOUR}:00, full by " +
+                    "${ComfortLight.DEFAULT_FULL_HOUR}:00, off again at " +
+                    "0${ComfortLight.DEFAULT_END_HOUR}:00. The slider above is how warm it gets.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Volume keys turn pages", style = MaterialTheme.typography.bodyLarge)
+            Switch(
+                checked = typography.volumeKeysTurnPages,
+                onCheckedChange = { onChange(typography.copy(volumeKeysTurnPages = it)) },
+            )
+        }
+        if (typography.volumeKeysTurnPages) {
+            Text(
+                "Volume up goes back, volume down goes forward - the way the text moves. " +
+                    "They are volume keys again everywhere else in the app.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         TextButton(onClick = { onChange(ReaderTypography()) }) {
             Text("Reset to defaults")
