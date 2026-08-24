@@ -125,6 +125,13 @@ android {
     }
 }
 
+// Room writes the schema it expects to app/schemas/ on every build. SchemaGuardTest reads those
+// files and compares them against MigrationSql, which is the only way to catch a bad migration
+// here: schema checks happen inside a real database on a device, and CI has no emulator.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")

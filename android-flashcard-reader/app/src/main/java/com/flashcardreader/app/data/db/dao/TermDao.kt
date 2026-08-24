@@ -35,6 +35,14 @@ interface TermDao {
     @Query("SELECT * FROM terms")
     suspend fun getAll(): List<Term>
 
-    @Query("SELECT * FROM terms WHERE due IS NOT NULL AND due <= :now ORDER BY due ASC")
+    /**
+     * Cards waiting to be answered.
+     *
+     * A null `due` means "never scheduled", which is how every AI-written word arrives - and it is
+     * due now, exactly as [com.flashcardreader.app.data.fsrs.Fsrs.isDue], StatsViewModel and
+     * ReadingCheckDao all already treat it. Requiring `due IS NOT NULL` made the evening reminder
+     * count zero after a session that wrote eight new words, while Progress said eight were due.
+     */
+    @Query("SELECT * FROM terms WHERE due IS NULL OR due <= :now ORDER BY due IS NOT NULL, due ASC")
     suspend fun getDue(now: Long): List<Term>
 }

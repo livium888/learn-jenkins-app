@@ -103,8 +103,10 @@ data class ReaderUiState(
     val checkDue: Boolean = false,
     /** Plain-language status of the reading checks, so a silent feature can be diagnosed. */
     val checkStatus: String = "",
-    /** Seconds of genuinely-read text banked this session, for the "open vs read" mirror. */
-    val verifiedSeconds: Long = 0,
+    // verifiedSeconds used to live here. It was recomputed twice a second - recomposing the whole
+    // reader tree each time - and read by no composable; the open-vs-read mirror it was built for
+    // is drawn on Progress from ReadingLog instead. The measurement is unaffected: pendingReadMs
+    // still accumulates and still flushes.
 )
 
 class ReaderViewModel(
@@ -161,9 +163,6 @@ class ReaderViewModel(
      * zero every time and the tally would never move. The remainder is carried instead.
      */
     private var pendingReadMs = 0L
-
-    /** Verified milliseconds already written out, so the live readout can show the running total. */
-    private var flushedReadMs = 0L
 
     /** Earned time held back until it makes a whole second, for the same reason. */
     private var pendingEarnMs = 0L
@@ -399,7 +398,6 @@ class ReaderViewModel(
         if (readSeconds > 0) {
             readingLog.addRead(readSeconds)
             pendingReadMs -= readSeconds * 1000
-            flushedReadMs += readSeconds * 1000
         }
     }
 
@@ -444,10 +442,7 @@ class ReaderViewModel(
         // could qualify at nearly twice that pace - so reading fast credited far more time than it
         // took, and the gate then doubled it. Milliseconds are carried rather than divided each
         // tick, or the remainder would be lost half a second at a time.
-        if (result.readMs > 0) {
-            pendingReadMs += result.readMs
-            _uiState.update { it.copy(verifiedSeconds = (pendingReadMs + flushedReadMs) / 1000) }
-        }
+        if (result.readMs > 0) pendingReadMs += result.readMs
         if (result.payableMs > 0 && focusPrefs.enabled) {
             pendingEarnMs += result.payableMs
             val whole = pendingEarnMs / 1000
