@@ -40,8 +40,8 @@ android {
         applicationId = "com.flashcardreader.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 18
-        versionName = "0.3.2"
+        versionCode = 19
+        versionName = "0.3.3"
     }
 
     // A single, committed signing key so every build - CI or local - signs with the

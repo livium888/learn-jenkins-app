@@ -127,6 +127,26 @@ fun BrowseBooksScreen(viewModel: BrowseBooksViewModel, onBack: () -> Unit) {
                     modifier = Modifier.padding(horizontal = Spacing.screen),
                 )
             }
+            // Say how much this source actually holds. A short list looks the same whether the
+            // catalogue is small, the search was narrow, or the read was cut short - and without
+            // this, "why is it only showing fifteen books?" cannot be answered from the screen.
+            state.matchedTotal?.let { total ->
+                Text(
+                    if (state.partialRead) {
+                        "$total titles so far — some of this catalogue's feeds didn't answer. " +
+                            "Tap the bug icon for what happened."
+                    } else {
+                        "$total titles"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (state.partialRead) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.padding(horizontal = Spacing.screen),
+                )
+            }
 
             // Shelves, not keywords: the way in when you don't already know a title. Shown only
             // where the source really files books by subject - on a catalogue that doesn't, tapping

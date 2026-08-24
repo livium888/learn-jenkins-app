@@ -65,6 +65,19 @@ interface BookCatalog {
     fun invalidate() {}
 
     /**
+     * How many titles the current search or shelf matched, or null where the source answers page
+     * by page and cannot know.
+     *
+     * Shown to the reader because "why is this only fifteen books?" is otherwise unanswerable from
+     * the screen: a short list looks identical whether the catalogue is small, the crawl was cut
+     * short, or the search was narrow.
+     */
+    val matchedTotal: Int? get() = null
+
+    /** True when the last read of this source was cut short, so [matchedTotal] is a floor. */
+    val readWasCutShort: Boolean get() = false
+
+    /**
      * Everything this source holds, or null if it can't say.
      *
      * Only a source that hands over a complete catalogue can answer this. A live-query source like

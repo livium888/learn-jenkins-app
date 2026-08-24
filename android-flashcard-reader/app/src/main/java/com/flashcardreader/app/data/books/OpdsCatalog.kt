@@ -120,6 +120,10 @@ class OpdsCatalog(
         return more()
     }
 
+    override val matchedTotal: Int? get() = matched.size.takeIf { cached != null }
+
+    override val readWasCutShort: Boolean get() = incomplete
+
     /** The next page of the current match, straight from memory - the feed is already read. */
     override suspend fun more(): List<RemoteBook> {
         if (served >= matched.size) return emptyList()
@@ -146,9 +150,15 @@ class OpdsCatalog(
     /**
      * Breadth-first over the feed graph, under a fixed request budget.
      *
-     * Pagination (`next`) is followed eagerly because it is the same catalogue continued. Sub-feeds
-     * are only entered when a feed held no books of its own, which is exactly the shape of a
-     * navigation feed - so a normal catalogue costs no extra requests.
+     * Pagination (`next`) is followed first, because it is the same catalogue continued. Sub-feeds
+     * are followed afterwards.
+     *
+     * Sub-feeds used to be entered *only* when a feed held no books of its own, on the theory that
+     * a feed with books is a shelf rather than an index. Real catalogues are not that tidy: a feed
+     * that lists a dozen recent titles and also links to the rest is common, and under the old rule
+     * that dozen was the entire catalogue as far as this app was concerned. Standard Ebooks showed
+     * fifteen books and would load no more. Entering both costs requests, which is what the budget
+     * is for.
      */
     private suspend fun crawl(): List<RemoteBook> {
         val found = LinkedHashMap<String, RemoteBook>()
@@ -184,10 +194,8 @@ class OpdsCatalog(
 
             // Continue this catalogue to its end before looking anywhere else.
             page.next?.let { if (it !in visited) frontier.addFirst(it) }
-            // A feed with no books of its own is an index; its children are where the books live.
-            if (page.books.isEmpty()) {
-                page.subFeeds.filterNot { it in visited }.take(MAX_SUBFEEDS).forEach(frontier::addLast)
-            }
+            // Then follow where it points, whether or not it also carried books of its own.
+            page.subFeeds.filterNot { it in visited }.take(MAX_SUBFEEDS).forEach(frontier::addLast)
         }
 
         val books = found.values.toList()
@@ -220,9 +228,22 @@ class OpdsCatalog(
         /** How many books reach the screen at once. The rest arrive as you scroll. */
         private const val PAGE = 60
 
-        /** Hard ceilings so a mis-linked feed can never turn into an unbounded crawl. */
-        private const val MAX_REQUESTS = 24
-        private const val MAX_SUBFEEDS = 12
+        /**
+         * Hard ceilings so a mis-linked feed can never turn into an unbounded crawl.
+         *
+         * Raised from 24 along with entering sub-feeds unconditionally: a catalogue filed by
+         * subject now costs one request per shelf, and 24 ran out inside the first index. Still a
+         * fixed bound - the crawl stops at whichever of these three limits it reaches first, and
+         * [incomplete] says so afterwards rather than pretending the result is the whole library.
+         */
+        private const val MAX_REQUESTS = 80
+        /**
+         * How many sub-feeds to take from any one feed.
+         *
+         * A catalogue that files by subject can publish dozens; taking them all from the first
+         * index would spend the whole budget before reaching anything else.
+         */
+        private const val MAX_SUBFEEDS = 40
         private const val MAX_BOOKS = 4_000
 
         /** One stray keyword isn't a shelf system, but three real subjects already are one. */

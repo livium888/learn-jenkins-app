@@ -35,6 +35,10 @@ data class BrowseUiState(
     val addedIds: Set<String> = emptySet(),
     val message: String? = null,
     val customFeeds: List<CustomFeed> = emptyList(),
+    /** How many titles the current source matched, when it can say. */
+    val matchedTotal: Int? = null,
+    /** True when that source's read was cut short, so the count is a floor. */
+    val partialRead: Boolean = false,
     /** Set when the selected catalogue answered "who are you?" - the fix is signing in, not retrying. */
     val needsLogin: Boolean = false,
     /** Subject shelves and author suggestions - the way in when you don't know a title. */
@@ -123,6 +127,8 @@ class BrowseBooksViewModel(
                         refreshing = false,
                         results = books,
                         needsLogin = false,
+                        matchedTotal = catalog.matchedTotal,
+                        partialRead = catalog.readWasCutShort,
                         message = if (wasRefreshing) refreshMessage(books.size) else it.message,
                     )
                 }
@@ -175,6 +181,8 @@ class BrowseBooksViewModel(
                         loading = false,
                         refreshing = false,
                         results = books,
+                        matchedTotal = catalog.matchedTotal,
+                        partialRead = catalog.readWasCutShort,
                         message = if (wasRefreshing) refreshMessage(books.size) else it.message,
                     )
                 }
