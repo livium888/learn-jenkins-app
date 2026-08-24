@@ -226,7 +226,6 @@ fun ReaderSettingsSheet(
     }
 }
 
-@Composable
 /** One row of theme chips, each drawn in the colours it would actually give the page. */
 @Composable
 private fun ThemeRow(
