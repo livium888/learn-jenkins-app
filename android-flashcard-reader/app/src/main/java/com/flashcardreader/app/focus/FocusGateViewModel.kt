@@ -29,6 +29,8 @@ data class FocusUiState(
     val apps: List<InstalledApp> = emptyList(),
     val loadingApps: Boolean = false,
     val balanceSeconds: Long = 0L,
+    /** Minutes of app access earned per minute of verified reading. */
+    val minutesPerReadingMinute: Float = 2f,
     /** Diagnostics, so "it just doesn't work" is answerable without a debugger. */
     val serviceRunning: Boolean = false,
     val lastDetected: String? = null,
@@ -64,6 +66,7 @@ class FocusGateViewModel(
                 hasUsageAccess = UsageAccess.hasUsageAccess(context),
                 canOverlay = UsageAccess.canDrawOverlays(context),
                 blocked = prefs.blockedPackages,
+                minutesPerReadingMinute = prefs.minutesPerReadingMinute,
                 serviceRunning = FocusGateService.isRunning,
                 lastDetected = FocusGateService.lastDetected,
                 overlayError = FocusGateService.lastOverlayError,
@@ -77,6 +80,19 @@ class FocusGateViewModel(
         prefs.enabled = enabled
         _uiState.update { it.copy(enabled = enabled) }
         if (enabled) FocusGateService.start(context) else FocusGateService.stop(context)
+    }
+
+    /**
+     * Sets how much app time a minute of verified reading is worth.
+     *
+     * Exposed because the right number is a personal one, and because the rate used to be applied
+     * on top of an inflated measure of reading time - so anyone who tuned their habits around the
+     * old behaviour needs a way to put it back where they want it.
+     */
+    fun setRate(minutesPerReadingMinute: Float) {
+        val clamped = minutesPerReadingMinute.coerceIn(MIN_RATE, MAX_RATE)
+        prefs.minutesPerReadingMinute = clamped
+        _uiState.update { it.copy(minutesPerReadingMinute = clamped) }
     }
 
     fun toggleBlocked(packageName: String) {
@@ -112,7 +128,13 @@ class FocusGateViewModel(
         }
     }
 
-    private companion object {
-        const val ICON_PX = 96
+    companion object {
+        private const val ICON_PX = 96
+
+        /** Slider bounds, in minutes of app time per minute of reading. */
+        const val MIN_RATE = 0.25f
+        const val MAX_RATE = 3f
+        /** One step per quarter-minute across the range. */
+        const val RATE_STEPS = 10
     }
 }

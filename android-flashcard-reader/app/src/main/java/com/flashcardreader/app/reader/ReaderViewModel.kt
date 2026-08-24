@@ -153,7 +153,20 @@ class ReaderViewModel(
      */
     /** Open/read time waiting to be written out - see flushReadingLog. */
     private var pendingOpenMs = 0L
-    private var pendingReadSeconds = 0L
+
+    /**
+     * Verified reading held in milliseconds, not seconds.
+     *
+     * Ticks are half a second long, so anything rounded to whole seconds per tick would round to
+     * zero every time and the tally would never move. The remainder is carried instead.
+     */
+    private var pendingReadMs = 0L
+
+    /** Verified milliseconds already written out, so the live readout can show the running total. */
+    private var flushedReadMs = 0L
+
+    /** Earned time held back until it makes a whole second, for the same reason. */
+    private var pendingEarnMs = 0L
 
     private var wordsSinceCheck = 0
     private val chunksSinceCheck = linkedSetOf<Int>()
@@ -382,9 +395,11 @@ class ReaderViewModel(
             readingLog.addOpen(openSeconds)
             pendingOpenMs -= openSeconds * 1000
         }
-        if (pendingReadSeconds > 0) {
-            readingLog.addRead(pendingReadSeconds)
-            pendingReadSeconds = 0
+        val readSeconds = pendingReadMs / 1000
+        if (readSeconds > 0) {
+            readingLog.addRead(readSeconds)
+            pendingReadMs -= readSeconds * 1000
+            flushedReadMs += readSeconds * 1000
         }
     }
 
@@ -420,19 +435,29 @@ class ReaderViewModel(
         // Paying out and having read are now separate: a re-read page still counts as reading even
         // though it can never earn twice. The checks follow "read", the credit bank follows "paid".
         if (result.creditedChunk != null) {
-            val earnedSeconds = ReadingCreditTracker.contentValueSeconds(result.creditedWords)
             val credited = creditTracker.creditedChunks.toSet()
-            viewModelScope.launch {
-                if (focusPrefs.enabled) creditBank.earnFromReading(earnedSeconds)
-                libraryRepository.saveCreditedChunks(source, credited)
+            viewModelScope.launch { libraryRepository.saveCreditedChunks(source, credited) }
+        }
+
+        // Real time, not the notional worth of the words. Both the tally shown on Progress and the
+        // Focus Gate balance used to be priced from the word count at an assumed pace, while a page
+        // could qualify at nearly twice that pace - so reading fast credited far more time than it
+        // took, and the gate then doubled it. Milliseconds are carried rather than divided each
+        // tick, or the remainder would be lost half a second at a time.
+        if (result.readMs > 0) {
+            pendingReadMs += result.readMs
+            _uiState.update { it.copy(verifiedSeconds = (pendingReadMs + flushedReadMs) / 1000) }
+        }
+        if (result.payableMs > 0 && focusPrefs.enabled) {
+            pendingEarnMs += result.payableMs
+            val whole = pendingEarnMs / 1000
+            if (whole > 0) {
+                pendingEarnMs -= whole * 1000
+                viewModelScope.launch { creditBank.earnFromReading(whole) }
             }
         }
 
         val readChunk = result.readChunk ?: return
-        val readSeconds = ReadingCreditTracker.contentValueSeconds(result.readWords)
-        pendingReadSeconds += readSeconds
-        _uiState.update { it.copy(verifiedSeconds = it.verifiedSeconds + readSeconds) }
-
         chunksSinceCheck.add(readChunk)
         wordsSinceCheck += result.readWords
         maybePrepareReadingCheck()

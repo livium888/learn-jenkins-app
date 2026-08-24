@@ -15,6 +15,18 @@ data class CreditTick(
      */
     val readChunk: Int? = null,
     val readWords: Int = 0,
+    /**
+     * Milliseconds of genuine reading this tick - time actually spent, not the notional worth of
+     * the words on the page.
+     *
+     * This used to be computed from the word count at an assumed 240 words a minute, while the
+     * dwell floor let a page qualify at 450. So the fastest allowed reading credited nearly twice
+     * the time it took, and Focus Gate then doubled that again. Two minutes of reading could bank
+     * close to four. Time spent is the only thing worth calling time spent.
+     */
+    val readMs: Long = 0L,
+    /** The part of [readMs] that may earn Focus Gate credit - a page pays once, ever. */
+    val payableMs: Long = 0L,
     /** True when accrual is paused because nobody has touched the screen for a while. */
     val idle: Boolean = false,
 )
@@ -74,6 +86,12 @@ class ReadingCreditTracker(
      * and not restored: a fresh sitting with a familiar book is still a sitting spent reading.
      */
     private val readThisSession = HashSet<Int>()
+
+    /** Verified milliseconds already granted per page, so one page cannot pay out forever. */
+    private val verifiedMs = HashMap<Int, Long>()
+
+    /** Pages that began earning this session, so their time keeps counting while they are read. */
+    private val payableThisSession = HashSet<Int>()
     private var lastInteractionAt = 0L
     private var bucketWords = 0f
 
@@ -141,19 +159,34 @@ class ReadingCreditTracker(
         val read = if (firstReadThisSession) focusedChunk else null
         val readWords = if (firstReadThisSession) wordCount else 0
 
+        // How much time this page may ever be worth. Without a ceiling, a page left open would go
+        // on counting as reading; with one, an untouched screen earns what one page is worth and
+        // stops. Priced at a *slow* pace so genuinely slow reading is counted in full.
+        val ceilingMs = wordCount * 60_000L / SLOW_WPM
+        val alreadyGiven = verifiedMs[focusedChunk] ?: 0L
+        // The tick that qualifies the page hands over the dwell it took to get there; every tick
+        // after that hands over only itself. Either way the total is the time really spent here.
+        val wanted = if (firstReadThisSession) accumulated else elapsedMs
+        val grantMs = wanted.coerceAtMost((ceilingMs - alreadyGiven).coerceAtLeast(0L))
+        verifiedMs[focusedChunk] = alreadyGiven + grantMs
+
         // Paying out is the part that stays once-ever, and the part the rate cap governs.
         val buckets = bucketsFor(focusedChunk)
-        if (buckets.all { it in credited } || bucketWords < wordCount) {
-            return CreditTick(readChunk = read, readWords = readWords)
+        val alreadyPaid = buckets.all { it in credited }
+        var creditedChunk: Int? = null
+        if (!alreadyPaid && bucketWords >= wordCount) {
+            bucketWords -= wordCount
+            buckets.forEach { credited.add(it) }
+            payableThisSession.add(focusedChunk)
+            creditedChunk = focusedChunk
         }
-
-        bucketWords -= wordCount
-        buckets.forEach { credited.add(it) }
         return CreditTick(
-            creditedChunk = focusedChunk,
-            creditedWords = wordCount,
+            creditedChunk = creditedChunk,
+            creditedWords = if (creditedChunk != null) wordCount else 0,
             readChunk = read,
             readWords = readWords,
+            readMs = grantMs,
+            payableMs = if (focusedChunk in payableThisSession) grantMs else 0L,
         )
     }
 
@@ -178,7 +211,19 @@ class ReadingCreditTracker(
          */
         const val CREDIT_BUCKET_CHARS = 400
 
-        /** What a page of [words] is worth, in seconds of reading value. */
-        fun contentValueSeconds(words: Int): Long = words * 60L / TYPICAL_WPM
+        /**
+         * The slowest pace still treated as reading, used to cap what one page can ever be worth.
+         *
+         * Deliberately slower than anyone reads. Its job is not to judge pace - the dwell floor
+         * already refuses anything implausibly fast - but to stop a page left open on a desk from
+         * counting as reading all afternoon.
+         */
+        const val SLOW_WPM = 120
+
+        // contentValueSeconds(words) = words * 60 / TYPICAL_WPM used to live here, and was how
+        // both the "actually read" tally and the Focus Gate balance were priced. It is deleted
+        // rather than left unused: it credited what a page was notionally worth at 240 words a
+        // minute while the dwell floor let a page qualify at 450, so the fastest allowed reading
+        // was paid nearly twice the time it took. Time spent is measured now - see CreditTick.readMs.
     }
 }

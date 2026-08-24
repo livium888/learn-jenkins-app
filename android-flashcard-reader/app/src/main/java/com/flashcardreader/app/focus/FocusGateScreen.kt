@@ -15,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -134,6 +135,34 @@ fun FocusGateScreen(
             }
 
             SectionCard {
+                SectionTitle("Exchange rate")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("1 minute of reading", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "${formatRate(state.minutesPerReadingMinute)} min of apps",
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                    )
+                }
+                Slider(
+                    value = state.minutesPerReadingMinute,
+                    onValueChange = { viewModel.setRate(it) },
+                    valueRange = FocusGateViewModel.MIN_RATE..FocusGateViewModel.MAX_RATE,
+                    steps = FocusGateViewModel.RATE_STEPS,
+                )
+                Text(
+                    "Reading time is measured in real seconds spent on a page, so this is the " +
+                        "whole exchange rate - nothing else multiplies it. A page pays once: " +
+                        "re-reading still counts as reading, but it can't be banked twice.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            SectionCard {
                 SectionTitle("Gated apps")
                 // A proper row with a chevron: as plain text this read as a label, not a button.
                 Surface(
@@ -200,6 +229,13 @@ fun FocusGateScreen(
             }
         }
     }
+}
+
+/** "2", "1.5", "0.25" - no trailing zeroes, and no locale surprises from String.format. */
+private fun formatRate(rate: Float): String {
+    val rounded = Math.round(rate * 100) / 100.0
+    if (rounded == Math.floor(rounded)) return rounded.toInt().toString()
+    return rounded.toString().trimEnd('0').trimEnd('.')
 }
 
 @Composable

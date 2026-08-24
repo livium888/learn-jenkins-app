@@ -261,3 +261,94 @@ class PaidTextSurvivesRelayoutTest {
         assertTrue("a different page still pays", readPage(tracker, 8, 200, 400_000) > 0)
     }
 }
+
+/**
+ * Reported from a phone: "I'm reading under two minutes and about 4 minutes are added."
+ *
+ * The cause was that time was priced from the word count at an assumed 240 words a minute, while
+ * the dwell floor let a page qualify at 450 - so the fastest allowed reading was credited nearly
+ * twice the time it took, and Focus Gate then doubled it again. These pin down the only property
+ * that makes the number worth showing: verified reading can never exceed time actually spent.
+ */
+class VerifiedTimeIsRealTimeTest {
+
+    private val idle = 600_000L
+
+    /** Reads one page for [seconds], a tick at a time, and returns the verified milliseconds. */
+    private fun read(tracker: ReadingCreditTracker, page: Int, words: Int, seconds: Int, startMs: Long): Long {
+        tracker.noteInteraction(startMs)
+        var now = startMs
+        var verified = 0L
+        repeat(seconds * 2) {
+            now += 500
+            verified += tracker.tick(now, page, words, 500).readMs
+        }
+        return verified
+    }
+
+    @Test
+    fun `verified time never exceeds the time actually spent`() {
+        val tracker = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        // 300 words qualifies after 300/450 min = 40s. Read it for exactly 60s.
+        val verified = read(tracker, page = 0, words = 300, seconds = 60, startMs = 10_000)
+        assertTrue("must credit something for a page genuinely read", verified > 0)
+        assertTrue(
+            "credited ${verified}ms for 60s of reading - it must never exceed real time",
+            verified <= 60_000,
+        )
+    }
+
+    @Test
+    fun `reading fast is not paid as though it were slow`() {
+        // The exact shape of the bug: a page read at the fastest allowed pace used to be credited
+        // its worth at 240 wpm, which is 1.875x what it took.
+        val tracker = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        val words = 450
+        val secondsSpent = 60 // exactly 450 wpm
+        val verified = read(tracker, page = 0, words = words, seconds = secondsSpent, startMs = 10_000)
+        assertTrue(
+            "credited ${verified / 1000}s for ${secondsSpent}s at the cap - the old code gave 112s",
+            verified <= secondsSpent * 1000L,
+        )
+    }
+
+    @Test
+    fun `a page left open stops counting once it is worth no more`() {
+        val tracker = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        // 120 words is worth at most 120/120 = one minute, however long the page stays up.
+        val verified = read(tracker, page = 0, words = 120, seconds = 600, startMs = 10_000)
+        assertTrue("ten minutes on one short page must not count as ten minutes", verified <= 60_000)
+    }
+
+    @Test
+    fun `earning tracks the same real time, and a page still pays only once`() {
+        val tracker = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        tracker.noteInteraction(10_000)
+        var now = 10_000L
+        var payable = 0L
+        var verified = 0L
+        repeat(120) {
+            now += 500
+            val tick = tracker.tick(now, 0, 300, 500)
+            payable += tick.payableMs
+            verified += tick.readMs
+        }
+        assertEquals("what earns and what counts as read are the same time", verified, payable)
+
+        // A second session over the same text: still reading, but it has already been paid for.
+        val later = ReadingCreditTracker(capWpm = 450, idleTimeoutMs = idle)
+        later.restore(tracker.creditedChunks)
+        later.noteInteraction(500_000)
+        var t = 500_000L
+        var laterPayable = 0L
+        var laterVerified = 0L
+        repeat(120) {
+            t += 500
+            val tick = later.tick(t, 0, 300, 500)
+            laterPayable += tick.payableMs
+            laterVerified += tick.readMs
+        }
+        assertTrue("re-reading is still reading", laterVerified > 0)
+        assertEquals("but it must never pay twice", 0L, laterPayable)
+    }
+}
