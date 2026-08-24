@@ -6,11 +6,17 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.WindowManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,7 +40,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +50,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -145,6 +151,9 @@ fun ReaderScreen(
     }
     val fontFamily = loadedFont.family
 
+    // Chrome starts hidden. Tapping the page brings it back, and any menu you open puts it away
+    // again on the way out, so the default state of the reader is always just the book.
+    var chromeVisible by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
@@ -209,16 +218,39 @@ fun ReaderScreen(
         scope.launch { pagerState.scrollToPage(idx.coerceIn(0, (state.chunks.size - 1).coerceAtLeast(0))) }
     }
 
-    Scaffold(
-        topBar = {
+    // The reader is the page, and nothing else. Chrome is off until you ask for it - one tap on
+    // the text brings it back, the way an e-reader does, because a top bar and a progress bar
+    // permanently parked on a phone screen is most of a paragraph's worth of book you never see.
+    //
+    // Drawn *over* the page rather than around it. Putting it in Scaffold's slots would change the
+    // height available to the text every time the menu opened, and the height is an input to
+    // pagination - so every tap would re-lay-out the book and lose your place in the process.
+    val chrome: @Composable BoxScope.() -> Unit = {
+        AnimatedVisibility(
+            visible = chromeVisible,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
             TopAppBar(
                 title = { Text(state.source?.title ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = colors.background,
+                    titleContentColor = colors.text,
+                    navigationIconContentColor = colors.text,
+                    actionIconContentColor = colors.text,
+                ),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
+                    // The add-flashcard button was a floating action button parked over the text.
+                    // It is a rare action - it belongs in the menu with everything else.
+                    IconButton(onClick = { flashcardPrefill = FlashcardPrefill(clipboardText(context), "") }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add flashcard")
+                    }
                     IconButton(onClick = { showSearch = true }) {
                         Icon(Icons.Filled.Search, contentDescription = "Search in book")
                     }
@@ -237,26 +269,23 @@ fun ReaderScreen(
                     }
                 },
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { flashcardPrefill = FlashcardPrefill(clipboardText(context), "") },
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "Add flashcard")
+        }
+
+        Column(modifier = Modifier.align(Alignment.BottomCenter)) {
+            // A finished chapter is announced whether or not the menu is up: it is rare, it is
+            // dismissible, and it is the one thing here worth interrupting a hidden-chrome page for.
+            state.pendingPass?.let { pass ->
+                ChapterPassBanner(
+                    title = pass.chapterTitle,
+                    onOpen = viewModel::openChapterPass,
+                    onDismiss = viewModel::dismissChapterPass,
+                )
             }
-        },
-        bottomBar = {
-            if (!state.loading) {
-                // A finished chapter is announced, never forced. Sitting above the progress bar it
-                // is out of the way of the text, and reading carries on accruing behind it - only
-                // an *open* pass covers the page (see readerOverlays).
-                state.pendingPass?.let { pass ->
-                    ChapterPassBanner(
-                        title = pass.chapterTitle,
-                        onOpen = viewModel::openChapterPass,
-                        onDismiss = viewModel::dismissChapterPass,
-                    )
-                }
+            AnimatedVisibility(
+                visible = chromeVisible,
+                enter = fadeIn() + slideInVertically { it },
+                exit = fadeOut() + slideOutVertically { it },
+            ) {
                 ReaderProgressBar(
                     pageIndex = pagerState.currentPage,
                     pageCount = state.chunks.size,
@@ -275,8 +304,10 @@ fun ReaderScreen(
                     },
                 )
             }
-        },
-    ) { padding ->
+        }
+    }
+
+    Scaffold { padding ->
         if (state.loading) {
             Box(Modifier.fillMaxSize().padding(padding).background(colors.background))
             return@Scaffold
@@ -443,7 +474,17 @@ fun ReaderScreen(
                             selecting = pressingRange,
                             selected = selectedRange,
                             onSelecting = { viewModel.onReadingInteraction(); pressingRange = it },
-                            onClear = { viewModel.onReadingInteraction(); selectedRange = null; pressingRange = null },
+                            onClear = {
+                                viewModel.onReadingInteraction()
+                                // A tap while something is selected means "put that away", not
+                                // "show me the menu" - one intent per tap.
+                                if (selectedRange != null || pressingRange != null) {
+                                    selectedRange = null
+                                    pressingRange = null
+                                } else {
+                                    chromeVisible = !chromeVisible
+                                }
+                            },
                             onSelectPhrase = { phrase, range ->
                                 selectedRange = range
                                 pressingRange = null
@@ -477,6 +518,10 @@ fun ReaderScreen(
                         .background(Color(0xFFFF6A00).copy(alpha = (typography.warmth * 0.5f).coerceIn(0f, 0.5f))),
                 )
             }
+
+            // The menu, over the page rather than around it - see the comment where it is built.
+            // Drawn last so the warm overlay tints the page and not the controls.
+            chrome()
         }
     }
 
