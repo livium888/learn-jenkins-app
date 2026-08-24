@@ -38,6 +38,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +55,7 @@ import com.flashcardreader.app.data.db.entities.Source
 import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.AppTopBar
 import com.flashcardreader.app.ui.ConfirmDialog
+import kotlin.math.roundToInt
 import com.flashcardreader.app.ui.OutlineButton
 import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.ui.Spacing
@@ -86,6 +88,19 @@ fun LibraryScreen(
         uiState.error?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
+        }
+    }
+
+    // Looks for books saved before their text was being cleaned. Runs once per visit, on whatever
+    // is in the library, and only flags a book where tidying would actually change something.
+    LaunchedEffect(sources) {
+        if (sources.isNotEmpty()) viewModel.checkForBlankSpace(sources)
+    }
+
+    LaunchedEffect(uiState.tidyResult) {
+        uiState.tidyResult?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.dismissTidyResult()
         }
     }
 
@@ -143,7 +158,14 @@ fun LibraryScreen(
                     verticalArrangement = Arrangement.spacedBy(Spacing.tight + 4.dp),
                 ) {
                     items(sources, key = { it.id }) { source ->
-                        SourceCard(source = source, onOpen = { onOpenSource(source.id) }, onDelete = { pendingDelete = source })
+                        SourceCard(
+                            source = source,
+                            onOpen = { onOpenSource(source.id) },
+                            onDelete = { pendingDelete = source },
+                            blankRatio = uiState.needsTidying[source.id],
+                            tidying = uiState.tidying == source.id,
+                            onTidy = { viewModel.tidy(source) },
+                        )
                     }
                 }
             }
@@ -201,7 +223,14 @@ private fun AddFromWebDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
 }
 
 @Composable
-private fun SourceCard(source: Source, onOpen: () -> Unit, onDelete: () -> Unit) {
+private fun SourceCard(
+    source: Source,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+    blankRatio: Float? = null,
+    tidying: Boolean = false,
+    onTidy: () -> Unit = {},
+) {
     Surface(
         onClick = onOpen,
         shape = MaterialTheme.shapes.large,
@@ -225,6 +254,23 @@ private fun SourceCard(source: Source, onOpen: () -> Unit, onDelete: () -> Unit)
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Only shown where it would change something. The text was saved before the app
+                // was cleaning it, and the invisible characters a great many EPUBs use to draw a
+                // gap now cost whole pages - which only became visible once pages were real.
+                if (blankRatio != null) {
+                    Text(
+                        if (tidying) {
+                            "Tidying…"
+                        } else {
+                            "${(blankRatio * 100).roundToInt()}% of this book is empty lines — tap to tidy"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .clickable(enabled = !tidying, onClick = onTidy),
+                    )
+                }
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -78,6 +78,20 @@ class ReadingCheckRepository(
 
     suspend fun deleteForSource(sourceId: Long) = dao.deleteForSource(sourceId)
 
+    /**
+     * Moves every question's position after its book's text was tidied.
+     *
+     * A question remembers where in the book it came from, and that is how the reader knows which
+     * ones belong to a chapter and where to send you back to. Cleaning the text without moving
+     * these would leave every question pointing at the wrong place.
+     */
+    suspend fun remapOffsets(sourceId: Long, move: (Int) -> Int) {
+        for (card in dao.forSource(sourceId)) {
+            val moved = move(card.charOffset)
+            if (moved != card.charOffset) dao.update(card.copy(charOffset = moved))
+        }
+    }
+
     /** Removes a question judged to be a bad one, so it is never scheduled again. */
     suspend fun discard(card: ReadingCheckCard) = dao.delete(card)
 

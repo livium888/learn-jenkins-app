@@ -215,7 +215,10 @@ internal fun blockText(doc: org.jsoup.nodes.Document): String {
         // (e.g. <blockquote><p>…</p></blockquote>) to avoid duplicating the same prose.
         if (block.parents().any { it.tagName() in BLOCK_TAGS }) continue
         val t = block.text().trim()
-        if (t.isNotEmpty()) sb.append(t).append("\n\n")
+        // isBlank rather than isEmpty: `<p>&nbsp;</p>` is how a great many EPUBs draw a gap, and
+        // a no-break space survives trim(). Kept, it becomes a paragraph of nothing plus a blank
+        // line - which is where pages that are mostly empty come from.
+        if (!TextTidy.isBlank(t)) sb.append(t).append("\n\n")
     }
     val result = sb.toString().trim()
     return result.ifEmpty { doc.body()?.text().orEmpty() }
@@ -238,7 +241,7 @@ internal fun blockTextWithChapters(doc: org.jsoup.nodes.Document): Pair<String, 
     for (block in blocks) {
         if (block.parents().any { it.tagName() in BLOCK_TAGS }) continue
         val t = block.text().trim()
-        if (t.isEmpty()) continue
+        if (TextTidy.isBlank(t)) continue
         val tag = block.tagName().lowercase()
         if (tag in HEADING_TAGS) {
             chapters.add(Chapter(t, sb.length, level = tag.removePrefix("h").toIntOrNull() ?: 1))

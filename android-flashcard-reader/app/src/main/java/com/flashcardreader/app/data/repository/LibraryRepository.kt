@@ -13,6 +13,9 @@ import com.flashcardreader.app.data.parser.EpubParser
 import com.flashcardreader.app.data.parser.MobiParser
 import com.flashcardreader.app.data.parser.ParserRegistry
 import com.flashcardreader.app.data.parser.PdfParser
+import com.flashcardreader.app.data.parser.OffsetMap
+import com.flashcardreader.app.data.parser.TextTidy
+import com.flashcardreader.app.reader.ReadingCreditTracker
 import com.flashcardreader.app.data.parser.WebArticleExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -65,6 +68,70 @@ class LibraryRepository(
                 Chapter(o.getString("title"), o.getInt("offset"), o.optInt("level", 0))
             }
         }.getOrDefault(emptyList())
+    }
+
+    /**
+     * How much of a book is empty lines - the number that decides whether it needs tidying.
+     *
+     * Cheap enough to ask on the library screen: it walks the cached text once and counts lines.
+     */
+    suspend fun blankRatio(source: Source): Float = withContext(Dispatchers.IO) {
+        runCatching { TextTidy.blankRatio(readText(source)) }.getOrDefault(0f)
+    }
+
+    /**
+     * Cleans a book that was saved before its text was being tidied, in place.
+     *
+     * Re-importing would be the alternative, and it would cost the reading position, the bookmarks
+     * and every question the book has produced - all of which are recorded as char offsets into the
+     * text being cleaned. So the text is rewritten and every one of those offsets is carried across
+     * with it, using the map the tidying produced.
+     *
+     * Returns how many characters went, or 0 if there was nothing to do.
+     */
+    suspend fun tidyExistingText(
+        source: Source,
+        remapCheckOffsets: suspend (OffsetMap) -> Unit = {},
+    ): Int = withContext(Dispatchers.IO) {
+        val original = readText(source)
+        if (original.isEmpty()) return@withContext 0
+        val tidied = TextTidy.tidy(original)
+        if (tidied.removedChars == 0) return@withContext 0
+
+        File(source.textFilePath).writeText(tidied.text)
+
+        val chapters = readChapters(source).map { it.copy(charOffset = tidied.offsets.map(it.charOffset)) }
+        if (chapters.isNotEmpty()) {
+            val arr = JSONArray()
+            for (c in chapters) {
+                arr.put(JSONObject().put("title", c.title).put("offset", c.charOffset).put("level", c.level))
+            }
+            tocFile(source).writeText(arr.toString())
+        }
+
+        val bookmarks = readBookmarks(source).map { it.copy(offset = tidied.offsets.map(it.offset)) }
+        if (bookmarks.isNotEmpty()) saveBookmarks(source, bookmarks)
+
+        // Focus Gate's record of paid-for text is kept in buckets of characters, so it has to move
+        // too - otherwise tidying a book would hand it back unpaid and it could be earned twice.
+        val paid = readCreditedChunks(source)
+        if (paid.isNotEmpty()) {
+            val moved = HashSet<Int>()
+            for (bucket in paid) {
+                val from = tidied.offsets.map(bucket * ReadingCreditTracker.CREDIT_BUCKET_CHARS)
+                val to = tidied.offsets.map((bucket + 1) * ReadingCreditTracker.CREDIT_BUCKET_CHARS - 1)
+                for (b in (from / ReadingCreditTracker.CREDIT_BUCKET_CHARS)..(to / ReadingCreditTracker.CREDIT_BUCKET_CHARS)) {
+                    moved.add(b)
+                }
+            }
+            saveCreditedChunks(source, moved)
+        }
+
+        // The page breaks describe text that no longer exists, so they go and are worked out again.
+        pageCacheFile(source).delete()
+        sourceDao.update(source.copy(lastPositionChar = tidied.offsets.map(source.lastPositionChar)))
+        remapCheckOffsets(tidied.offsets)
+        tidied.removedChars
     }
 
     /** Bookmarks for a book, newest first, read from its sidecar file. */
@@ -253,14 +320,19 @@ class LibraryRepository(
             throw IllegalStateException("Couldn't read that file - it may be corrupted or password-protected.")
         }
 
+        // Tidied before anything is stored, so the invisible junk that turns into empty pages
+        // never reaches the reader - and the chapter anchors move with it, since they are char
+        // offsets into the very text being cleaned.
+        val tidied = TextTidy.tidy(parsed.text)
+        val chapters = parsed.chapters.map { it.copy(charOffset = tidied.offsets.map(it.charOffset)) }
         // Keep the beginning if a book is absurdly long; the reader ignores chapter anchors past the end.
-        val text = if (parsed.text.length > MAX_TEXT_CHARS) parsed.text.substring(0, MAX_TEXT_CHARS) else parsed.text
+        val text = if (tidied.text.length > MAX_TEXT_CHARS) tidied.text.substring(0, MAX_TEXT_CHARS) else tidied.text
         val type = when (parser) {
             is EpubParser -> SourceType.EPUB
             is PdfParser -> SourceType.PDF
             is MobiParser -> SourceType.MOBI
         }
-        persist(title = parsed.title, type = type, originUri = uri.toString(), text = text, chapters = parsed.chapters)
+        persist(title = parsed.title, type = type, originUri = uri.toString(), text = text, chapters = chapters)
     }
 
     /**

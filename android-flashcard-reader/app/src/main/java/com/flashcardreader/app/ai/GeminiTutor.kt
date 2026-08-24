@@ -263,6 +263,15 @@ object GeminiTutor {
         parseAnswer(payload)
     }
 
+    /**
+     * How many vocabulary cards one stretch of reading may produce.
+     *
+     * Low on purpose. These are written without anyone asking, and every one becomes a card that
+     * will interrupt reading when the word next appears - so two per stretch is already generous,
+     * and the prompt is told to return none rather than pad.
+     */
+    private const val VOCAB_CEILING = 2
+
     /** Below this there isn't enough read text for a question worth asking. */
     private const val MIN_PASSAGE_CHARS = 400
 
