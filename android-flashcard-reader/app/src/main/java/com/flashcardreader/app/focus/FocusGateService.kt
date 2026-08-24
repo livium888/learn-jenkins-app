@@ -79,6 +79,12 @@ class FocusGateService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSt
     private var lastEventCursor = 0L
     private var lastBlockedSeenAt = 0L
 
+    /** The body text currently on screen, so an unchanged line is never re-posted. */
+    private var shownText: String? = null
+
+    /** App labels are resolved once each; the poll runs every second and PackageManager is not free. */
+    private val labels = HashMap<String, String>()
+
     /** Flipped so the watchdog can tell whether the process still has a live service. */
     companion object {
         @Volatile
@@ -238,17 +244,35 @@ class FocusGateService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSt
         val blocked = pkg != null && pkg in prefs.blockedPackages && pkg != packageName
         if (!blocked) {
             if (overlay != null) hideOverlay()
+            // A book being read is the one place this number does not belong. While our own app is
+            // in front the banked figure is left exactly as it was and catches up the moment you
+            // leave - so there is never a total rising in step with the page you are reading.
+            if (pkg != packageName) refreshNotification(GateNotification.text(bank.balanceSeconds, null))
             return
         }
         lastBlockedSeenAt = android.os.SystemClock.elapsedRealtime()
+        // Non-null by construction: `blocked` is only true when pkg is a real package.
+        val gated = pkg ?: return
+        val label = labelFor(gated)
         val balance = bank.balanceSeconds
         if (balance > 0) {
             // Spend while the app is in front; the poll interval is the tick.
             bank.spend(FAST_POLL_MS / 1000)
-            if (bank.balanceSeconds <= 0) showOverlay(pkg!!) else if (overlay != null) hideOverlay()
+            // Whole minutes, so this changes about once a minute rather than once a second: enough
+            // to answer "how much is left" without a meter draining in front of you.
+            refreshNotification(GateNotification.text(bank.balanceSeconds, label))
+            if (bank.balanceSeconds <= 0) showOverlay(gated) else if (overlay != null) hideOverlay()
         } else {
-            showOverlay(pkg!!)
+            refreshNotification(GateNotification.text(0, label))
+            showOverlay(gated)
         }
+    }
+
+    /** The user-visible name of an installed package, resolved once and remembered. */
+    private fun labelFor(pkg: String): String = labels.getOrPut(pkg) {
+        runCatching {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        }.getOrDefault("this app")
     }
 
     // ---------------------------------------------------------------- overlay
@@ -257,10 +281,7 @@ class FocusGateService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSt
         if (overlay != null && overlayForPackage == pkg) return@withContext
         removeOverlayView()
         overlayForPackage = pkg
-        val label = runCatching {
-            val info = packageManager.getApplicationInfo(pkg, 0)
-            packageManager.getApplicationLabel(info).toString()
-        }.getOrDefault("This app")
+        val label = labelFor(pkg)
 
         val view = ComposeView(this@FocusGateService).apply {
             setViewTreeLifecycleOwner(this@FocusGateService)
@@ -333,23 +354,53 @@ class FocusGateService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSt
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Focus Gate is on")
-            .setContentText("Reading earns time for your gated apps.")
-            .setOngoing(true)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setContentIntent(tap)
-            .build()
+        val text = GateNotification.text(bank.balanceSeconds, null)
+        shownText = text
         ServiceCompat.startForeground(
             this,
             NOTIF_ID,
-            notification,
+            buildNotification(text, tap),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             } else {
                 0
             },
         )
+    }
+
+    private fun buildNotification(text: String, tap: PendingIntent): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(GateNotification.TITLE)
+            .setContentText(text)
+            .setOngoing(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setContentIntent(tap)
+            // The channel is already IMPORTANCE_LOW, but an update to an ongoing notification can
+            // still re-sort the shade; this keeps it where the user left it.
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .build()
+
+    /**
+     * Posts [text] only when it differs from what is already showing.
+     *
+     * The poll runs every second, so without this the system would be handed an identical
+     * notification sixty times a minute to redraw. With it, the shade is touched roughly once a
+     * minute while spending and once per state change otherwise.
+     */
+    private fun refreshNotification(text: String) {
+        if (text == shownText) return
+        shownText = text
+        val tap = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+        runCatching {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(NOTIF_ID, buildNotification(text, tap))
+        }
     }
 }
