@@ -30,6 +30,9 @@ class ReadingLog(context: Context) {
     /** Seconds of that which was verified reading today. */
     val readSecondsToday: Long get() = if (storedDay == today) prefs.getLong(KEY_READ, 0L) else 0L
 
+    /** Words of verified reading today - the other half of a reading pace. */
+    val readWordsToday: Long get() = if (storedDay == today) prefs.getLong(KEY_WORDS, 0L) else 0L
+
     /**
      * Share of time-open that was real reading, 0..100, or null when too little time has passed
      * for the number to mean anything. A ratio off ten seconds is noise, not a finding.
@@ -43,12 +46,23 @@ class ReadingLog(context: Context) {
         val open = openSecondsToday
         val read = readSecondsToday
         if (open <= 0 && read <= 0) return past
-        return ReadingHistory.rolledInto(past, ReadingDay(today, open, read))
+        return ReadingHistory.rolledInto(past, ReadingDay(today, open, read, readWordsToday))
     }
 
     fun addOpen(seconds: Long) = add(KEY_OPEN, seconds)
 
-    fun addRead(seconds: Long) = add(KEY_READ, seconds)
+    /**
+     * Records verified reading. [words] is what was read in that time, kept so a reading pace can
+     * be worked out from measurement rather than from how often pages happened to turn.
+     */
+    fun addRead(seconds: Long, words: Long = 0) {
+        if (seconds <= 0 && words <= 0) return
+        rollIfNeeded()
+        val edit = prefs.edit()
+        if (seconds > 0) edit.putLong(KEY_READ, prefs.getLong(KEY_READ, 0L) + seconds)
+        if (words > 0) edit.putLong(KEY_WORDS, prefs.getLong(KEY_WORDS, 0L) + words)
+        edit.apply()
+    }
 
     private fun add(key: String, seconds: Long) {
         if (seconds <= 0) return
@@ -68,7 +82,12 @@ class ReadingLog(context: Context) {
         val today = this.today
         val stored = storedDay
         if (stored == today) return
-        val finished = ReadingDay(stored, prefs.getLong(KEY_OPEN, 0L), prefs.getLong(KEY_READ, 0L))
+        val finished = ReadingDay(
+            stored,
+            prefs.getLong(KEY_OPEN, 0L),
+            prefs.getLong(KEY_READ, 0L),
+            prefs.getLong(KEY_WORDS, 0L),
+        )
         val history = ReadingHistory.rolledInto(
             ReadingHistory.parse(prefs.getString(KEY_HISTORY, "").orEmpty()),
             finished,
@@ -78,6 +97,7 @@ class ReadingLog(context: Context) {
             .putLong(KEY_DAY, today)
             .putLong(KEY_OPEN, 0L)
             .putLong(KEY_READ, 0L)
+            .putLong(KEY_WORDS, 0L)
             .apply()
     }
 
@@ -86,6 +106,7 @@ class ReadingLog(context: Context) {
         const val KEY_DAY = "day"
         const val KEY_OPEN = "open_seconds"
         const val KEY_READ = "read_seconds"
+        const val KEY_WORDS = "read_words"
         const val KEY_HISTORY = "history"
     }
 }

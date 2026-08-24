@@ -25,6 +25,7 @@ import com.flashcardreader.app.data.repository.TermRepository
 import com.flashcardreader.app.focus.CreditBank
 import com.flashcardreader.app.focus.FocusPrefs
 import com.flashcardreader.app.theme.ReaderPrefs
+import java.time.LocalDate
 import com.flashcardreader.app.theme.ReaderTypography
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -105,6 +106,13 @@ data class ReaderUiState(
     val checkDue: Boolean = false,
     /** Plain-language status of the reading checks, so a silent feature can be diagnosed. */
     val checkStatus: String = "",
+    /**
+     * The reader's measured reading speed, or the published average until there is enough to know.
+     * What "12 min left in this chapter" is worked out from.
+     */
+    val pace: ReadingPace.Pace = ReadingPace.Pace(ReadingPace.ASSUMED_WPM, measured = false),
+    /** This book's average word length, so a character count can become a word count cheaply. */
+    val charsPerWord: Float = 0f,
     /**
      * A chapter pass that has been written and is waiting.
      *
@@ -190,6 +198,16 @@ class ReaderViewModel(
     /** Earned time held back until it makes a whole second, for the same reason. */
     private var pendingEarnMs = 0L
 
+    /**
+     * Words of verified reading waiting to be written out.
+     *
+     * Kept beside the milliseconds because the two together are a reading pace, and a pace measured
+     * from text that passed the anti-fake rules is worth far more than one inferred from how often
+     * a page happened to turn - it has already discarded the page you flicked past and the page you
+     * left open while making tea.
+     */
+    private var pendingReadWords = 0L
+
     private var wordsSinceCheck = 0
     private val chunksSinceCheck = linkedSetOf<Int>()
     private var checkJob: Job? = null
@@ -255,12 +273,22 @@ class ReaderViewModel(
                     .filter { it.reps > 0 }
                     .toMutableList()
             }.getOrDefault(mutableListOf())
+            // Measured once from a sample rather than by walking the whole book: it feeds a figure
+            // rounded to the nearest minute, and a few million characters of arithmetic on every
+            // open would be paid for by everyone to refine a number nobody could see change.
+            val charsPerWord = withContext(Dispatchers.Default) {
+                val sample = text.take(SAMPLE_CHARS_FOR_WORD_LENGTH)
+                val words = sample.split(WORD_SPLIT).count { it.isNotBlank() }
+                if (words > 0) sample.length.toFloat() / words else 0f
+            }
+            val pace = ReadingPace.paceFrom(readingLog.history(), LocalDate.now().toEpochDay())
             _uiState.update {
                 it.copy(
                     source = source, fullText = text, terms = terms,
                     chapters = chapters, bookmarks = bookmarks,
                     currentCharOffset = source?.lastPositionChar ?: 0,
                     typography = typography, loading = false,
+                    pace = pace, charsPerWord = charsPerWord,
                 )
             }
         }
@@ -439,9 +467,10 @@ class ReaderViewModel(
             pendingOpenMs -= openSeconds * 1000
         }
         val readSeconds = pendingReadMs / 1000
-        if (readSeconds > 0) {
-            readingLog.addRead(readSeconds)
+        if (readSeconds > 0 || pendingReadWords > 0) {
+            readingLog.addRead(readSeconds, pendingReadWords)
             pendingReadMs -= readSeconds * 1000
+            pendingReadWords = 0
         }
         persistReadChunks()
     }
@@ -505,6 +534,7 @@ class ReaderViewModel(
         // took, and the gate then doubled it. Milliseconds are carried rather than divided each
         // tick, or the remainder would be lost half a second at a time.
         if (result.readMs > 0) pendingReadMs += result.readMs
+        if (result.readWords > 0) pendingReadWords += result.readWords
         if (result.payableMs > 0 && focusPrefs.enabled) {
             pendingEarnMs += result.payableMs
             val whole = pendingEarnMs / 1000
@@ -979,6 +1009,9 @@ class ReaderViewModel(
 
 /** How much open/read time to accumulate before writing it to disk. */
 private const val FLUSH_EVERY_MS = 30_000L
+
+/** How much of a book to measure to learn its average word length. Plenty for a rounded figure. */
+private const val SAMPLE_CHARS_FOR_WORD_LENGTH = 200_000
 
 /** Enough already-sent quotation to build a chapter pass from without uploading the chapter again. */
 private const val MIN_QUOTED_CHARS = 2_500

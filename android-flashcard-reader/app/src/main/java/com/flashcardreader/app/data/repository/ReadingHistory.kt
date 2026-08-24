@@ -1,10 +1,15 @@
 package com.flashcardreader.app.data.repository
 
-/** One day's totals: how long a book was open, and how much of that was genuine reading. */
+/** One day's totals: how long a book was open, how much of that was genuine reading, and how much. */
 data class ReadingDay(
     val epochDay: Long,
     val openSeconds: Long,
     val readSeconds: Long,
+    /**
+     * Words of verified reading. Zero on days recorded before this was kept, which is why anything
+     * deriving a pace has to check it has enough to work with rather than dividing blindly.
+     */
+    val readWords: Long = 0,
 ) {
     /** Share of time-open that was real reading, 0..100, or null when the day is too short to say. */
     val attentionPct: Int?
@@ -40,18 +45,22 @@ object ReadingHistory {
         .split(ROW)
         .mapNotNull { row ->
             val parts = row.split(FIELD)
-            if (parts.size != 3) return@mapNotNull null
+            if (parts.size !in 3..4) return@mapNotNull null
             val day = parts[0].toLongOrNull() ?: return@mapNotNull null
             val open = parts[1].toLongOrNull() ?: return@mapNotNull null
             val read = parts[2].toLongOrNull() ?: return@mapNotNull null
-            ReadingDay(day, open.coerceAtLeast(0), read.coerceAtLeast(0))
+            // Four fields since words were added; three from before that, which still parse.
+            val words = parts.getOrNull(3)?.toLongOrNull() ?: 0L
+            ReadingDay(day, open.coerceAtLeast(0), read.coerceAtLeast(0), words.coerceAtLeast(0))
         }
         .sortedBy { it.epochDay }
 
     fun serialize(days: List<ReadingDay>): String = days
         .sortedBy { it.epochDay }
         .takeLast(MAX_DAYS)
-        .joinToString(ROW) { "${it.epochDay}$FIELD${it.openSeconds}$FIELD${it.readSeconds}" }
+        .joinToString(ROW) {
+            "${it.epochDay}$FIELD${it.openSeconds}$FIELD${it.readSeconds}$FIELD${it.readWords}"
+        }
 
     /**
      * Files a finished day into the history, replacing any row already there for that date.
@@ -82,4 +91,8 @@ object ReadingHistory {
     /** Total verified reading over the last [days], in seconds. */
     fun readSecondsIn(history: List<ReadingDay>, todayEpochDay: Long, days: Int): Long =
         since(history, todayEpochDay - days + 1).sumOf { it.readSeconds }
+
+    /** Total words of verified reading over the last [days]. */
+    fun readWordsIn(history: List<ReadingDay>, todayEpochDay: Long, days: Int): Long =
+        since(history, todayEpochDay - days + 1).sumOf { it.readWords }
 }

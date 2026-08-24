@@ -213,6 +213,55 @@ fun ReaderScreen(
         }
     }
 
+    // What is left to read, in time. The pace behind it is measured rather than guessed - see
+    // ReadingPace - which is the whole reason this is worth showing at all.
+    val timeLeft = remember(
+        state.currentCharOffset,
+        state.chapters,
+        state.fullText.length,
+        state.pace,
+        state.charsPerWord,
+    ) {
+        val here = state.currentCharOffset
+        val bookEnd = state.fullText.length
+        if (bookEnd <= here) {
+            null
+        } else {
+            // To the end of this chapter if the book has any, otherwise to the end of the book -
+            // "four hours left" is not an answer to the question you ask mid-chapter.
+            val chapterEnd = state.chapters.map { it.charOffset }.firstOrNull { it > here }
+            val end = chapterEnd ?: bookEnd
+            val horizon = if (chapterEnd != null) ReadingPace.IN_CHAPTER else ReadingPace.IN_BOOK
+            val words = ReadingPace.wordsRemaining(end - here, state.charsPerWord)
+            ReadingPace.label(ReadingPace.minutesFor(words, state.pace), horizon)
+        }
+    }
+
+    /**
+     * What a tap on the page means, by where it landed.
+     *
+     * The e-reader model: the outer edges turn pages, the middle opens the menu. Swiping still
+     * works and always did - this is for the hand that is holding the phone rather than the one
+     * that is free, which is most of the time anyone reads on a phone.
+     */
+    fun onPageTap(fractionX: Float) {
+        viewModel.onReadingInteraction()
+        // A tap while something is selected means "put that away", not anything else.
+        if (selectedRange != null || pressingRange != null) {
+            selectedRange = null
+            pressingRange = null
+            return
+        }
+        val last = (state.chunks.size - 1).coerceAtLeast(0)
+        when {
+            fractionX < TAP_BACK_EDGE ->
+                scope.launch { pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceAtLeast(0)) }
+            fractionX > TAP_FORWARD_EDGE ->
+                scope.launch { pagerState.animateScrollToPage((pagerState.currentPage + 1).coerceAtMost(last)) }
+            else -> chromeVisible = !chromeVisible
+        }
+    }
+
     fun jumpToOffset(offset: Int) {
         val idx = chunkIndexForOffset(state.chunks, offset)
         scope.launch { pagerState.scrollToPage(idx.coerceIn(0, (state.chunks.size - 1).coerceAtLeast(0))) }
@@ -302,6 +351,7 @@ fun ReaderScreen(
                     onScrubToPage = { page ->
                         scope.launch { pagerState.scrollToPage(page.coerceIn(0, (state.chunks.size - 1).coerceAtLeast(0))) }
                     },
+                    timeLeft = timeLeft,
                 )
             }
         }
@@ -464,6 +514,11 @@ fun ReaderScreen(
                     Column(
                         Modifier
                             .fillMaxSize()
+                            // Before the padding on purpose: the margins are part of the page, and
+                            // an edge tap is exactly where a thumb lands.
+                            .pointerInput(Unit) {
+                                detectTapGestures(onTap = { at -> onPageTap(at.x / size.width.toFloat()) })
+                            }
                             .padding(horizontal = marginDp, vertical = PAGE_VERTICAL_PADDING),
                     ) {
                         chunk.chapterTitle?.let { ChapterDivider(it, colors) }
@@ -474,17 +529,6 @@ fun ReaderScreen(
                             selecting = pressingRange,
                             selected = selectedRange,
                             onSelecting = { viewModel.onReadingInteraction(); pressingRange = it },
-                            onClear = {
-                                viewModel.onReadingInteraction()
-                                // A tap while something is selected means "put that away", not
-                                // "show me the menu" - one intent per tap.
-                                if (selectedRange != null || pressingRange != null) {
-                                    selectedRange = null
-                                    pressingRange = null
-                                } else {
-                                    chromeVisible = !chromeVisible
-                                }
-                            },
                             onSelectPhrase = { phrase, range ->
                                 selectedRange = range
                                 pressingRange = null
@@ -686,6 +730,8 @@ private fun ReaderProgressBar(
     secondsPerPage: Float,
     onSecondsPerPageChange: (Float) -> Unit,
     onScrubToPage: (Int) -> Unit,
+    /** "12 min left in this chapter", or null before there is anything to say. */
+    timeLeft: String?,
 ) {
     // Real pages now, not an estimate from a character count - so "page 40 of 312" is the book's
     // actual shape at this text size, and the scrubber lands on a page rather than near one.
@@ -724,7 +770,14 @@ private fun ReaderProgressBar(
                     )
                 }
                 Text(
-                    "Page ${shownPage + 1} of ${pageCount.coerceAtLeast(1)} · ${(fraction * 100).roundToInt()}%",
+                    buildString {
+                        append("Page ${shownPage + 1} of ${pageCount.coerceAtLeast(1)}")
+                        append(" · ${(fraction * 100).roundToInt()}%")
+                        // How much is left in time, not just in pages. Pages tell you how far
+                        // through you are; minutes tell you whether to carry on to the end of the
+                        // chapter, which is the question anyone actually has at this moment.
+                        if (timeLeft != null) append(" · $timeLeft")
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = muted,
                 )
@@ -918,7 +971,6 @@ private fun ChunkText(
     selecting: IntRange?,
     selected: IntRange?,
     onSelecting: (IntRange?) -> Unit,
-    onClear: () -> Unit,
     onSelectPhrase: (text: String, range: IntRange) -> Unit,
 ) {
     var layout by remember(chunk.startChar) { mutableStateOf<TextLayoutResult?>(null) }
@@ -984,9 +1036,6 @@ private fun ChunkText(
                         cursor = null
                     },
                 )
-            }
-            .pointerInput(chunk.startChar) {
-                detectTapGestures(onTap = { onClear() })
             },
     )
 }
@@ -1017,5 +1066,15 @@ private fun clipboardText(context: Context): String {
  * Long enough that a run of changes becomes one layout, short enough not to feel like lag.
  */
 private const val RELAYOUT_DEBOUNCE_MS = 250L
+
+/**
+ * Where the page-turning edges end, as a fraction of the page width.
+ *
+ * Wide enough to hit without looking, narrow enough that the middle - which opens the menu - is
+ * still the biggest target, because opening the menu by accident costs a tap and turning the page
+ * by accident costs your place.
+ */
+private const val TAP_BACK_EDGE = 0.28f
+private const val TAP_FORWARD_EDGE = 0.72f
 
 private const val CREDIT_TICK_MS = 500L
