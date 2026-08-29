@@ -55,6 +55,17 @@ jobs:
         continue-on-error: true
         run: ./gradlew -Psnapshots recordPaparazziRelease
 
+      # Bundled into one file so it can ride along on the Release. Actions artifacts live on
+      # blob storage that the development environment cannot reach, so an artifact is
+      # effectively write-only from there; a Release asset is fetchable. This is the only way
+      # the rendered screens can be looked at before someone installs the app on a phone.
+      - name: Bundle screenshots for the release
+        if: always()
+        continue-on-error: true
+        run: |
+          cd android-flashcard-reader/app/src/test/snapshots 2>/dev/null || exit 0
+          zip -qr "$GITHUB_WORKSPACE/screenshots.zip" . -i '*.png' || true
+
       - name: Upload screenshots
         if: always()
         continue-on-error: true
@@ -102,4 +113,6 @@ jobs:
             "Install anyway".
           prerelease: false
           make_latest: true
-          files: android-flashcard-reader/app/build/outputs/apk/release/app-release.apk
+          files: |
+            android-flashcard-reader/app/build/outputs/apk/release/app-release.apk
+            screenshots.zip

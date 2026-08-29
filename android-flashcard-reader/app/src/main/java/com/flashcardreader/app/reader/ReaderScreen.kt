@@ -91,6 +91,7 @@ import com.flashcardreader.app.ui.AppDialog
 import com.flashcardreader.app.ui.PrimaryButton
 import com.flashcardreader.app.theme.ComfortLight
 import com.flashcardreader.app.theme.ReaderColors
+import com.flashcardreader.app.theme.ReaderTypography
 import com.flashcardreader.app.theme.colorsFor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -409,29 +410,7 @@ fun ReaderScreen(
         // One TextStyle for measuring and for drawing. Anything set here that affects where the
         // lines fall must also appear in the pagination signature below, or the cached page breaks
         // would describe a layout that is no longer being drawn.
-        val style = TextStyle(
-            fontFamily = fontFamily,
-            fontSize = typography.fontSize,
-            lineHeight = typography.lineHeight,
-            letterSpacing = typography.letterSpacing,
-            color = colors.text,
-            textAlign = if (typography.justify) TextAlign.Justify else TextAlign.Start,
-            // Justified text without hyphenation is what produces the rivers of white space that
-            // make a page look wrong: with nowhere to break a long word, the line's remaining
-            // spaces have to stretch to fill the measure. Every printed book hyphenates; this is
-            // the single change that most makes justified text look typeset rather than stretched.
-            hyphens = Hyphens.Auto,
-            // Break lines by looking at the paragraph as a whole rather than greedily line by line.
-            // Slower, and worth it on a page of prose - it is what avoids a very short last line.
-            lineBreak = LineBreak.Paragraph,
-            // Font padding is a legacy Android quirk that adds uneven space above the first line
-            // and below the last. Off, the line spacing you asked for is the spacing you get.
-            platformStyle = PlatformTextStyle(includeFontPadding = false),
-            lineHeightStyle = LineHeightStyle(
-                alignment = LineHeightStyle.Alignment.Center,
-                trim = LineHeightStyle.Trim.None,
-            ),
-        )
+        val style = readerTextStyle(typography, fontFamily, colors.text)
 
         // Report the page on screen. Exactly one page is visible, so "what is being read" stops
         // being a range and becomes a single index - and turning a page is itself the human touch
@@ -1126,6 +1105,64 @@ private fun clipboardText(context: Context): String {
  *
  * Long enough that a run of changes becomes one layout, short enough not to feel like lag.
  */
+/**
+ * The text style the reader draws and measures with.
+ *
+ * Extracted so the screenshot tests build it the same way. A snapshot of a lookalike style proves
+ * nothing about the page - the whole value of seeing the page is that it is the page.
+ *
+ * Anything here that affects where the lines fall must also appear in the pagination signature, or
+ * the cached page breaks would describe a layout that is no longer being drawn.
+ */
+@OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
+internal fun readerTextStyle(
+    typography: ReaderTypography,
+    fontFamily: androidx.compose.ui.text.font.FontFamily,
+    color: Color,
+): TextStyle = TextStyle(
+    fontFamily = fontFamily,
+    fontSize = typography.fontSize,
+    lineHeight = typography.lineHeight,
+    letterSpacing = typography.letterSpacing,
+    color = color,
+    textAlign = if (typography.justify) TextAlign.Justify else TextAlign.Start,
+    // Justified text without hyphenation is what produces the rivers of white space that make a
+    // page look wrong: with nowhere to break a long word, the line's remaining spaces have to
+    // stretch to fill the measure. Every printed book hyphenates.
+    hyphens = Hyphens.Auto,
+    // Break lines by looking at the paragraph as a whole rather than greedily line by line.
+    // Slower, and worth it on a page of prose - it is what avoids a very short last line.
+    lineBreak = LineBreak.Paragraph,
+    // Font padding is a legacy Android quirk that adds uneven space above the first line and below
+    // the last. Off, the line spacing you asked for is the spacing you get.
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+    lineHeightStyle = LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Center,
+        trim = LineHeightStyle.Trim.None,
+    ),
+)
+
+/**
+ * One page of a book, drawn as the reader draws it, for the screenshot tests.
+ *
+ * The Android SDK is unreachable from where this app is written, so until now the page had only
+ * ever been checked by reading the source. This is what makes it possible to look at hyphenation,
+ * justification and a theme's contrast before anyone installs anything.
+ */
+@Composable
+internal fun ReaderPagePreviewBody(text: String, typography: ReaderTypography) {
+    val colors = colorsFor(typography.palette)
+    val style = readerTextStyle(typography, typography.font.family, colors.text)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .padding(horizontal = typography.horizontalMarginDp.dp, vertical = PAGE_VERTICAL_PADDING),
+    ) {
+        Text(text = text, style = style, modifier = Modifier.fillMaxWidth())
+    }
+}
+
 private const val RELAYOUT_DEBOUNCE_MS = 250L
 
 /**

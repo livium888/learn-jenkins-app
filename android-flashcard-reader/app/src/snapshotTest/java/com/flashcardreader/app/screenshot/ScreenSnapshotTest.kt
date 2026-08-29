@@ -10,7 +10,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.flashcardreader.app.ai.ReadingCheck
+import com.flashcardreader.app.reader.ReaderPagePreviewBody
 import com.flashcardreader.app.reader.ReadingCheckPreviewBody
+import com.flashcardreader.app.theme.ReaderPalette
+import com.flashcardreader.app.theme.ReaderTypography
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
@@ -43,6 +46,53 @@ class ScreenSnapshotTest {
                 System.getProperty("paparazzi.test.verify") != null,
         )
     }
+
+    /**
+     * A page of real prose, at the settings most likely to look wrong.
+     *
+     * Justified text is the case worth seeing: without hyphenation it develops rivers of white
+     * space, and no amount of reading the source tells you whether it did. Long words are included
+     * on purpose, because they are what a justified line has to stretch around.
+     */
+    private val pageText = """
+        The commissioners arrived in the spring and stayed for eleven weeks, and in all that time
+        they wrote nothing down that anyone afterwards could find. It was said in the valley that
+        they had been sent to look at the mill, and it was said in the town that they had been sent
+        to look at the commissioners; both accounts were incomprehensible to the families whose
+        wages were set, week by week, by the price of bread rather than by anything a commission
+        might recommend. Extraordinarily, the report when it finally came concluded that the valley
+        had been impoverished before the mill was built, which was true, and that it would have been
+        impoverished without it, which nobody had asked.
+    """.trimIndent().replace("\n", " ")
+
+    private fun page(typography: ReaderTypography) {
+        paparazzi.snapshot { ReaderPagePreviewBody(pageText, typography) }
+    }
+
+    @Test fun pageJustified() = page(ReaderTypography(justify = true))
+
+    @Test fun pageRagged() = page(ReaderTypography(justify = false))
+
+    /** The smallest text at the widest measure - the hardest case for justification. */
+    @Test fun pageSmallTextWideMeasure() =
+        page(ReaderTypography(fontSizeSp = 12f, marginScale = 0.5f, justify = true))
+
+    /** The largest text at the narrowest measure - few words per line, so breaks show worst. */
+    @Test fun pageLargeTextNarrowMeasure() =
+        page(ReaderTypography(fontSizeSp = 28f, marginScale = 2.5f, justify = true))
+
+    @Test fun pageSepia() = page(ReaderTypography(palette = ReaderPalette.SEPIA))
+
+    @Test fun pageCandle() = page(ReaderTypography(palette = ReaderPalette.CANDLE))
+
+    @Test fun pageCobalt() = page(ReaderTypography(palette = ReaderPalette.COBALT))
+
+    @Test fun pageBlack() = page(ReaderTypography(palette = ReaderPalette.BLACK))
+
+    /** Wide tracking and loose leading together, the dyslexia-friendly preset's shape. */
+    @Test fun pageDyslexiaPreset() = page(
+        ReaderTypography(fontSizeSp = 20f, lineHeightMultiplier = 1.9f, letterSpacingEm = 0.08f, justify = false),
+    )
 
     private val shortCheck = ReadingCheck(
         question = "Why did the lamplighter linger at the corner of Mill Street?",
